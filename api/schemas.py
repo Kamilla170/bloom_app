@@ -1,5 +1,5 @@
 """
-Pydantic схемы для REST API (Этап 3)
+Pydantic схемы для REST API
 """
 
 from datetime import datetime, date
@@ -54,7 +54,7 @@ class UpdateSettingsRequest(BaseModel):
     monthly_photo_reminder: Optional[bool] = None
 
 
-# === PLANTS (Этап 3) ===
+# === PLANTS ===
 
 class PlantSummary(BaseModel):
     id: int
@@ -196,8 +196,8 @@ class UsageStats(BaseModel):
 class SubscriptionPlan(BaseModel):
     id: str
     label: str
-    price: int              # текущая цена (со скидкой, если активна)
-    original_price: int     # цена без скидки; равна price, если скидки нет
+    price: int
+    original_price: int
     days: int
     per_month: Optional[int] = None
     is_popular: bool = False
@@ -237,3 +237,45 @@ class SuccessResponse(BaseModel):
 
 class ErrorResponse(BaseModel):
     detail: str
+
+
+# === ANALYTICS (Этап 9) ===
+
+class WateringStreakInfo(BaseModel):
+    current: int
+    max: int
+    target: int
+    percent: int
+
+
+class AchievementInfo(BaseModel):
+    code: str
+    title: str
+    category: str
+    target: int
+    current_value: int
+    icon: str
+    order: int
+    is_unlocked: bool
+    unlocked_at: Optional[str] = None
+    description: str
+
+
+class AnalyticsResponse(BaseModel):
+    total_plants: int
+    healthy_percent: int
+    watering_streak: WateringStreakInfo
+    achievements: List[AchievementInfo]
+    unlocked_count: int
+    total_achievements: int
+
+
+class NextAchievementInfo(BaseModel):
+    code: str
+    title: str
+    category: str
+    target: int
+    current_value: int
+    remaining: int
+    percent: int
+    icon: str
