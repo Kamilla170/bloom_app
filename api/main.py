@@ -11,8 +11,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-# Добавляем корневую директорию проекта в sys.path,
-# чтобы импорты вида `from database import ...` работали
+# Добавляем корневую директорию проекта в sys.path
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
@@ -26,16 +25,63 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# === Миграция: колонки для app-авторизации ===
+# === Миграции ===
 
 async def run_app_migrations():
-    """Добавить колонки email / password_hash в таблицу users"""
+    """Все миграции для REST API"""
     db = await get_db()
     async with db.pool.acquire() as conn:
+        # --- Этап 0: app-авторизация ---
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT UNIQUE")
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT")
         await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email IS NOT NULL")
-    logger.info("✅ App-миграции применены (email, password_hash)")
+        logger.info("✅ Миграция: email, password_hash")
+
+        # --- Этап 9: Аналитика и достижения ---
+        await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS total_photos INT DEFAULT 0")
+        await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS global_watering_streak INT DEFAULT 0")
+        await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS global_max_watering_streak INT DEFAULT 0")
+        await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_global_watering_date DATE")
+
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_achievements (
+                user_id BIGINT NOT NULL,
+                achievement_code VARCHAR(50) NOT NULL,
+                unlocked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (user_id, achievement_code)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_user_achievements_user
+            ON user_achievements(user_id)
+        """)
+
+        # Бэкфилл total_waterings (если триггер ещё не заполнил)
+        await conn.execute("""
+            UPDATE users u
+            SET total_waterings = COALESCE((
+                SELECT COUNT(*) FROM care_history ch
+                WHERE ch.user_id = u.user_id AND ch.action_type = 'watered'
+            ), 0)
+            WHERE total_waterings IS NULL OR total_waterings = 0
+        """)
+
+        # Бэкфилл total_photos
+        try:
+            await conn.execute("""
+                UPDATE users u
+                SET total_photos = COALESCE((
+                    SELECT COUNT(*) FROM plant_photos pp
+                    JOIN plants p ON pp.plant_id = p.id
+                    WHERE p.user_id = u.user_id
+                ), 0)
+                WHERE total_photos IS NULL OR total_photos = 0
+            """)
+        except Exception:
+            # plant_photos может не существовать
+            pass
+
+        logger.info("✅ Миграция: аналитика и достижения (Этап 9)")
 
 
 # === Lifecycle ===
@@ -70,10 +116,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — разрешаем запросы с мобильного приложения
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # В продакшене заменить на конкретные домены
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -87,12 +132,14 @@ from api.plants.router import router as plants_router
 from api.ai.router import router as ai_router
 from api.users.router import router as users_router
 from api.payments.router import router as payments_router
+from api.analytics.router import router as analytics_router
 
 app.include_router(auth_router)
 app.include_router(plants_router)
 app.include_router(ai_router)
 app.include_router(users_router)
 app.include_router(payments_router)
+app.include_router(analytics_router)
 
 
 # === Health check ===
