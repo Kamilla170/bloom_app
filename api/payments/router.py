@@ -30,7 +30,6 @@ router = APIRouter(prefix="/payments", tags=["payments"])
 async def _get_discount_info(user_id: int) -> tuple[bool, Optional[datetime]]:
     """
     Возвращает (имеет_скидку, когда_закончится).
-    Скидка действует DISCOUNT_DURATION_DAYS дней с момента регистрации.
     """
     try:
         db = await get_db()
@@ -54,7 +53,6 @@ async def _get_discount_info(user_id: int) -> tuple[bool, Optional[datetime]]:
 
 
 def _compute_discount_percent() -> int:
-    """Процент скидки считается по 1month: (1 - promo/regular) * 100"""
     regular = SUBSCRIPTION_PLANS["1month"]["price"]
     promo = DISCOUNT_PLANS["1month"]["price"]
     if regular <= 0:
@@ -114,6 +112,7 @@ async def create_new_payment(
         amount=plan["price"],
         days=plan["days"],
         plan_label=plan["label"],
+        plan_id=req.plan_id,
         save_method=save_method,
     )
 
