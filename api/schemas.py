@@ -181,6 +181,7 @@ class PlanInfo(BaseModel):
     days_left: Optional[int] = None
     auto_pay: bool = False
     is_grace_period: bool = False
+    plan_id: Optional[str] = None
 
 
 class UsageStats(BaseModel):
