@@ -34,7 +34,8 @@ def _get_headers(idempotency_key: str = None) -> dict:
 
 
 async def create_payment(user_id: int, amount: int = None, days: int = 30,
-                         plan_label: str = "1 месяц", save_method: bool = True) -> Optional[Dict]:
+                         plan_label: str = "1 месяц", plan_id: str = None,
+                         save_method: bool = True) -> Optional[Dict]:
     """Создать платёж в YooKassa."""
     if not YOOKASSA_SHOP_ID or not YOOKASSA_SECRET_KEY:
         logger.error("❌ YooKassa не настроена")
@@ -58,6 +59,7 @@ async def create_payment(user_id: int, amount: int = None, days: int = 30,
             "days": str(days),
             "amount": str(amount),
             "plan_label": plan_label,
+            "plan_id": plan_id or "",
         },
         "save_payment_method": save_method,
     }
@@ -73,7 +75,7 @@ async def create_payment(user_id: int, amount: int = None, days: int = 30,
                 data = await resp.json()
 
                 if resp.status == 200:
-                    logger.info(f"✅ Платёж создан: {data['id']} для user_id={user_id}, {plan_label}, {amount}₽")
+                    logger.info(f"✅ Платёж создан: {data['id']} user_id={user_id}, plan_id={plan_id}, {plan_label}, {amount}₽")
 
                     from database import get_db
                     db = await get_db()
@@ -98,7 +100,8 @@ async def create_payment(user_id: int, amount: int = None, days: int = 30,
 
 
 async def create_recurring_payment(user_id: int, payment_method_id: str,
-                                   amount: int = None, days: int = 30) -> Optional[Dict]:
+                                   amount: int = None, days: int = 30,
+                                   plan_id: str = None) -> Optional[Dict]:
     """Создать рекуррентный платёж."""
     if not YOOKASSA_SHOP_ID or not YOOKASSA_SECRET_KEY:
         return None
@@ -118,6 +121,7 @@ async def create_recurring_payment(user_id: int, payment_method_id: str,
             "type": "recurring",
             "days": str(days),
             "amount": str(amount),
+            "plan_id": plan_id or "",
         }
     }
 
@@ -132,7 +136,7 @@ async def create_recurring_payment(user_id: int, payment_method_id: str,
                 data = await resp.json()
 
                 if resp.status == 200:
-                    logger.info(f"✅ Рекуррентный платёж: {data['id']} для user_id={user_id}, {amount}₽/{days}д")
+                    logger.info(f"✅ Рекуррентный платёж: {data['id']} user_id={user_id}, plan_id={plan_id}, {amount}₽/{days}д")
 
                     from database import get_db
                     db = await get_db()
@@ -169,8 +173,9 @@ async def handle_payment_webhook(payload: dict) -> bool:
         user_id = int(user_id)
         days = int(metadata.get('days', 30))
         amount = int(metadata.get('amount', PRO_PRICE))
+        plan_id = metadata.get('plan_id') or None
 
-        logger.info(f"💳 Webhook: event={event_type}, payment_id={payment_id}, user_id={user_id}, {amount}₽/{days}д")
+        logger.info(f"💳 Webhook: event={event_type}, payment_id={payment_id}, user_id={user_id}, plan_id={plan_id}, {amount}₽/{days}д")
 
         from database import get_db
         db = await get_db()
@@ -196,11 +201,12 @@ async def handle_payment_webhook(payload: dict) -> bool:
             from services.subscription_service import activate_pro
             expires_at = await activate_pro(
                 user_id, days=days, amount=amount,
-                payment_method_id=payment_method_id
+                payment_method_id=payment_method_id,
+                plan_id=plan_id,
             )
 
             plan_label = metadata.get('plan_label', f'{days} дней')
-            logger.info(f"✅ Подписка активирована: user_id={user_id}, план={plan_label}, expires={expires_at}")
+            logger.info(f"✅ Подписка активирована: user_id={user_id}, plan_id={plan_id}, план={plan_label}, expires={expires_at}")
 
             await _notify_user_payment_success(user_id, expires_at, plan_label)
             return True
@@ -241,7 +247,8 @@ async def process_auto_payments():
         result = await create_recurring_payment(
             user_id, method_id,
             amount=sub.get('plan_amount', PRO_PRICE),
-            days=sub.get('plan_days', 30)
+            days=sub.get('plan_days', 30),
+            plan_id=sub.get('plan_id'),
         )
 
         if result:
@@ -252,7 +259,6 @@ async def process_auto_payments():
 
 
 async def _notify_user_payment_success(user_id: int, expires_at: datetime, plan_label: str = ""):
-    """Уведомить через FCM об успешной оплате"""
     try:
         from services.fcm_service import send_push_to_user
         expires_str = expires_at.strftime('%d.%m.%Y')
@@ -267,7 +273,6 @@ async def _notify_user_payment_success(user_id: int, expires_at: datetime, plan_
 
 
 async def _notify_user_payment_failed(user_id: int, reason: str):
-    """Уведомить через FCM о неудачной оплате"""
     try:
         from services.fcm_service import send_push_to_user
         await send_push_to_user(
@@ -281,7 +286,6 @@ async def _notify_user_payment_failed(user_id: int, reason: str):
 
 
 async def cancel_auto_payment(user_id: int):
-    """Отключить автоплатёж"""
     from database import get_db
     db = await get_db()
     async with db.pool.acquire() as conn:
