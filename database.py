@@ -423,6 +423,10 @@ class PlantDatabase:
                 await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS tip_watering_shown BOOLEAN DEFAULT FALSE")
                 # UTM-трекинг
                 await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS utm_source TEXT")
+                # Этап 3: дата следующего полива и серия поливов
+                await conn.execute("ALTER TABLE plants ADD COLUMN IF NOT EXISTS next_watering_date DATE")
+                await conn.execute("ALTER TABLE plants ADD COLUMN IF NOT EXISTS current_streak INTEGER DEFAULT 0")
+                await conn.execute("ALTER TABLE plants ADD COLUMN IF NOT EXISTS max_streak INTEGER DEFAULT 0")
             except Exception as e:
                 logger.info(f"Колонки уже существуют: {e}")
             
@@ -1039,7 +1043,10 @@ class PlantDatabase:
                        COALESCE(reminder_enabled, TRUE) as reminder_enabled,
                        notes, plant_type, growing_id,
                        current_state, state_changed_date, state_changes_count,
-                       growth_stage, last_photo_analysis
+                       growth_stage, last_photo_analysis,
+                       next_watering_date,
+                       COALESCE(current_streak, 0) as current_streak,
+                       COALESCE(max_streak, 0) as max_streak
                 FROM plants 
                 WHERE id = $1
             """
@@ -1096,7 +1103,10 @@ class PlantDatabase:
                        COALESCE(watering_interval, 5) as watering_interval,
                        COALESCE(reminder_enabled, TRUE) as reminder_enabled,
                        notes, plant_type, growing_id,
-                       current_state, state_changed_date, state_changes_count
+                       current_state, state_changed_date, state_changes_count,
+                       next_watering_date,
+                       COALESCE(current_streak, 0) as current_streak,
+                       COALESCE(max_streak, 0) as max_streak
                 FROM plants 
                 WHERE user_id = $1 AND (plant_type = 'regular' OR plant_type IS NULL)
                 ORDER BY saved_date DESC
@@ -1204,6 +1214,86 @@ class PlantDatabase:
                         logger.error(f"Ошибка добавления в историю: {e}")
             
             await self.update_user_activity(user_id, 'watered_plant')
+    
+    async def water_plant_with_streak(self, user_id: int, plant_id: int) -> Dict:
+        """
+        Полив растения с учётом серии.
+        Серия растёт, если полили вовремя (с grace-периодом 1 день),
+        и сбрасывается до 1, если опоздали больше чем на день.
+        Первый полив всегда стартует серию с 1.
+        """
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow("""
+                    SELECT last_watered,
+                           COALESCE(watering_interval, 5) as watering_interval,
+                           next_watering_date,
+                           COALESCE(current_streak, 0) as current_streak,
+                           COALESCE(max_streak, 0) as max_streak
+                    FROM plants
+                    WHERE id = $1 AND user_id = $2
+                """, plant_id, user_id)
+                
+                if not row:
+                    return {"success": False, "error": "Растение не найдено"}
+                
+                interval = row['watering_interval']
+                previous_streak = row['current_streak']
+                previous_max = row['max_streak']
+                previous_next_date = row['next_watering_date']
+                last_watered = row['last_watered']
+                
+                now = datetime.now()
+                today = now.date()
+                
+                # Расчёт серии
+                if last_watered is None or previous_next_date is None:
+                    # Первый полив или растение из доисторического периода без next_watering_date
+                    new_streak = 1
+                else:
+                    grace_deadline = previous_next_date + timedelta(days=1)
+                    if today <= grace_deadline:
+                        new_streak = previous_streak + 1
+                    else:
+                        new_streak = 1
+                
+                new_max_streak = max(previous_max, new_streak)
+                new_next_date = today + timedelta(days=interval)
+                
+                # Обновляем растение
+                await conn.execute("""
+                    UPDATE plants
+                    SET last_watered = $1,
+                        watering_count = COALESCE(watering_count, 0) + 1,
+                        next_watering_date = $2,
+                        current_streak = $3,
+                        max_streak = $4
+                    WHERE id = $5 AND user_id = $6
+                """, now, new_next_date, new_streak, new_max_streak, plant_id, user_id)
+                
+                # Счётчик в users
+                await conn.execute("""
+                    UPDATE users
+                    SET total_waterings = COALESCE(total_waterings, 0) + 1
+                    WHERE user_id = $1
+                """, user_id)
+                
+                # Лог в care_history (best-effort)
+                try:
+                    await conn.execute("""
+                        INSERT INTO care_history (plant_id, user_id, action_type, notes)
+                        VALUES ($1, $2, 'watered', $3)
+                    """, plant_id, user_id, f'Серия: {new_streak}')
+                except Exception as e:
+                    logger.warning(f"care_history: {e}")
+                
+                return {
+                    "success": True,
+                    "interval": interval,
+                    "next_watering_date": new_next_date,
+                    "current_streak": new_streak,
+                    "max_streak": new_max_streak,
+                }
     
     async def delete_plant(self, user_id: int, plant_id: int):
         """Удалить растение"""
