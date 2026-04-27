@@ -86,11 +86,11 @@ def extract_plant_state_from_analysis(raw_analysis: str) -> dict:
                 except:
                     pass
 
-    # Если подкормка нужна, но интервал не указан — ставим дефолт 21 день
+    # Если подкормка нужна, но интервал не указан: ставим дефолт 21 день
     if state_info['fertilizing_enabled'] and not state_info['fertilizing_interval']:
         state_info['fertilizing_interval'] = 21
 
-    # Если подкормка не нужна — обнуляем интервал
+    # Если подкормка не нужна: обнуляем интервал
     if not state_info['fertilizing_enabled']:
         state_info['fertilizing_interval'] = None
 
@@ -217,144 +217,51 @@ def _extract_plant_name_rus(raw_analysis: str) -> str:
                 match = re.search(r'\((?:возможно,?\s*)?([^)]+)\)', raw_name, re.IGNORECASE)
                 plant_name = match.group(1).strip() if match else raw_name
             else:
-                plant_name = re.sub(r'\s*\(возможно[^)]*\)\s*', '', raw_name, flags=re.IGNORECASE).strip() or raw_name
-            # Если в названии есть скобки с латынью — отрезаем их
-            plant_name = re.sub(r'\s*\([^)]*\)\s*', '', plant_name).strip() or plant_name
+                # Берём только русскую часть до латыни/скобок
+                cleaned = raw_name
+                latin_match = re.search(r'\b[A-Z][a-z]+\b', cleaned)
+                if latin_match:
+                    cleaned = cleaned[:latin_match.start()].strip(' (-,')
+                paren_match = cleaned.find('(')
+                if paren_match > 0:
+                    cleaned = cleaned[:paren_match].strip()
+                plant_name = cleaned or raw_name
             break
 
     return plant_name
 
 
-async def analyze_vision_step(image_data: bytes, user_question: str = None, previous_state: str = None) -> dict:
-    """ШАГ 1: Vision анализ через GPT-4o"""
+async def analyze_with_openai_advanced(image_data: bytes, user_question: str = None,
+                                       previous_state: str = None) -> dict:
+    """Расширенный анализ через OpenAI с единым промптом"""
     if not openai_client:
         return {"success": False, "error": "OpenAI API недоступен"}
 
     try:
-        optimized_image = await optimize_image_for_analysis(image_data, high_quality=True)
-        base64_image = base64.b64encode(optimized_image).decode('utf-8')
+        optimized = optimize_image_for_analysis(image_data)
+        base64_image = base64.b64encode(optimized).decode('utf-8')
 
-        vision_prompt = """Вы - профессиональный ботаник-диагност. Проанализируйте фотографию растения и опишите ТОЛЬКО то, что видно на изображении.
-
-ВАША ЗАДАЧА:
-1. Опишите что видно на фото
-2. Выявите возможные проблемы
-3. Оцените уровень уверенности (0-100%)
-
-ФОРМАТ ОТВЕТА:
-РАСТЕНИЕ: [конкретное название растения]
-УВЕРЕННОСТЬ: [число от 0 до 100]%
-
-ЧТО ВИДНО:
-- [детальное описание]
-
-ВОЗМОЖНЫЕ ПРОБЛЕМЫ:
-- [список проблем или "Проблем не обнаружено"]"""
-
-        if previous_state:
-            vision_prompt += f"\n\nПредыдущее состояние: {previous_state}. Обратите внимание на изменения."
-        if user_question:
-            vision_prompt += f"\n\nВопрос пользователя: {user_question}"
-
-        logger.info("📸 Vision анализ: GPT-4o")
-        response = await openai_client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": "Вы - профессиональный ботаник-диагност."},
-                {"role": "user", "content": [
-                    {"type": "text", "text": vision_prompt},
-                    {"type": "image_url", "image_url": {
-                        "url": f"data:image/jpeg;base64,{base64_image}",
-                        "detail": "high"
-                    }}
-                ]}
-            ],
-            max_tokens=1000,
-            temperature=0.2
-        )
-
-        raw_vision = response.choices[0].message.content
-
-        if len(raw_vision) < 50:
-            raise Exception("Некачественный ответ")
-
-        plant_name = "Неизвестное растение"
-        confidence = 50
-        vision_analysis = ""
-        possible_problems = ""
-
-        lines = raw_vision.split('\n')
-        current_section = None
-
-        for line in lines:
-            line = line.strip()
-            if line.startswith("РАСТЕНИЕ:"):
-                raw_name = line.replace("РАСТЕНИЕ:", "").strip()
-                if "неизвестное растение" in raw_name.lower() and "(" in raw_name:
-                    match = re.search(r'\((?:возможно,?\s*)?([^)]+)\)', raw_name, re.IGNORECASE)
-                    plant_name = match.group(1).strip() if match else raw_name
-                else:
-                    plant_name = re.sub(r'\s*\(возможно[^)]*\)\s*', '', raw_name, flags=re.IGNORECASE).strip() or raw_name
-            elif line.startswith("УВЕРЕННОСТЬ:"):
-                try:
-                    confidence = float(line.replace("УВЕРЕННОСТЬ:", "").strip().replace("%", ""))
-                except:
-                    confidence = 50
-            elif line.startswith("ЧТО ВИДНО:"):
-                current_section = "vision"
-                vision_analysis = line.replace("ЧТО ВИДНО:", "").strip() + "\n"
-            elif line.startswith("ВОЗМОЖНЫЕ ПРОБЛЕМЫ:"):
-                current_section = "problems"
-                possible_problems = line.replace("ВОЗМОЖНЫЕ ПРОБЛЕМЫ:", "").strip() + "\n"
-            elif current_section == "vision":
-                vision_analysis += line + "\n"
-            elif current_section == "problems":
-                possible_problems += line + "\n"
-
-        if not vision_analysis:
-            vision_analysis = raw_vision
-
-        logger.info(f"✅ Vision: {plant_name}, уверенность {confidence}%")
-
-        return {
-            "success": True,
-            "vision_analysis": vision_analysis.strip(),
-            "possible_problems": possible_problems.strip() if possible_problems else "Проблем не обнаружено",
-            "confidence": confidence,
-            "plant_name": plant_name,
-            "raw_observations": raw_vision
-        }
-
-    except Exception as e:
-        logger.error(f"❌ Vision ошибка: {e}", exc_info=True)
-        return {"success": False, "error": str(e)}
-
-
-async def analyze_with_openai_advanced(image_data: bytes, user_question: str = None, previous_state: str = None) -> dict:
-    """Полный анализ через единый промпт (для парсинга подкормки и состояния)"""
-    if not openai_client:
-        return {"success": False, "error": "OpenAI API недоступен"}
-
-    try:
         season_data = get_current_season()
+        season_tips = get_seasonal_care_tips()
+
+        # Оценочная корректировка интервала по сезону
+        water_adjustment_days = 0
+        season = season_data.get('season')
+        if season == 'winter':
+            water_adjustment_days = 6
+        elif season == 'spring':
+            water_adjustment_days = 1
+        elif season == 'summer':
+            water_adjustment_days = -2
+        elif season == 'autumn':
+            water_adjustment_days = 2
 
         feeding_recommendations = {
-            'winter': 'Прекратить подкормки или минимизировать',
-            'spring': 'Начать подкормки с половинной дозы',
-            'summer': 'Регулярные подкормки каждые 1-2 недели',
-            'autumn': 'Постепенно сокращать подкормки'
+            'winter': 'Зимой подкормка обычно НЕ нужна для большинства растений',
+            'spring': 'Весной начинаем активные подкормки каждые 14-21 дней',
+            'summer': 'Летом подкормки каждые 14-21 дней для активного роста',
+            'autumn': 'Осенью постепенно сокращаем подкормки до 30-45 дней',
         }
-
-        water_adjustment_days = 0
-        if season_data['season'] == 'winter':
-            water_adjustment_days = +5
-        elif season_data['season'] == 'summer':
-            water_adjustment_days = -2
-        elif season_data['season'] == 'autumn':
-            water_adjustment_days = +2
-
-        optimized_image = await optimize_image_for_analysis(image_data, high_quality=True)
-        base64_image = base64.b64encode(optimized_image).decode('utf-8')
 
         prompt = PLANT_IDENTIFICATION_PROMPT.format(
             season_name=season_data['season_ru'],
@@ -439,7 +346,7 @@ async def analyze_plant_image(image_data: bytes, user_question: str = None,
                               plant_context: str = None) -> dict:
     """
     Главная функция анализа.
-    Этап 3: используем единый промпт через analyze_with_openai_advanced —
+    Этап 3: используем единый промпт через analyze_with_openai_advanced,
     он корректно парсит состояние, интервал полива и подкормку.
     """
     logger.info("🔍 Запуск анализа растения")
@@ -476,11 +383,12 @@ async def answer_plant_question(question: str, plant_context: str = None) -> dic
 
 ПРАВИЛА:
 - Отвечайте именно на тот вопрос, который задан
-- Простой вопрос → короткий ответ (3-5 предложений)
-- Сложный вопрос → можно структурировать
+- Простой вопрос: короткий ответ (3-5 предложений)
+- Сложный вопрос: можно структурировать
 - Конкретные цифры где уместно
 - Учитывайте текущий сезон
-- Используйте HTML-теги <b></b> для выделения, НЕ markdown
+- Для выделения используйте ТОЛЬКО markdown: **жирный текст** и *курсив*
+- НЕ используйте HTML-теги (<b>, <i>, <strong>, <em>, <p>, <br> и подобные)
 - НЕ начинайте с шаблонных заголовков"""
 
         if plant_context:
