@@ -43,6 +43,31 @@ def _plant_photo_url(photo_file_id: str | None, width: int = 400) -> str | None:
     return get_photo_url(photo_file_id, width)
 
 
+async def _safe_check_achievements(user_id: int, category: str) -> None:
+    """
+    Проверка достижений никогда не должна валить core-флоу.
+    Если внутри упадёт — просто логируем и идём дальше.
+    """
+    try:
+        await check_and_unlock(user_id, category=category)
+    except Exception as e:
+        logger.warning(f"⚠️ check_and_unlock({category}) упал: {e}", exc_info=True)
+
+
+async def _safe_update_global_streak(user_id: int) -> None:
+    try:
+        await update_global_watering_streak(user_id)
+    except Exception as e:
+        logger.warning(f"⚠️ update_global_watering_streak упал: {e}", exc_info=True)
+
+
+async def _safe_increment_photo_count(user_id: int) -> None:
+    try:
+        await increment_photo_count(user_id)
+    except Exception as e:
+        logger.warning(f"⚠️ increment_photo_count упал: {e}", exc_info=True)
+
+
 def _plant_to_summary(p: dict) -> PlantSummary:
     """Преобразовать запись из БД в PlantSummary"""
     return PlantSummary(
@@ -65,6 +90,35 @@ def _plant_to_summary(p: dict) -> PlantSummary:
         fertilizing_interval=p.get("fertilizing_interval"),
         last_fertilized=p.get("last_fertilized"),
         next_fertilizing_date=p.get("next_fertilizing_date"),
+    )
+
+
+def _plant_to_detail(plant: dict) -> PlantDetail:
+    """Преобразовать запись из БД в PlantDetail"""
+    current_state = plant.get("current_state", "healthy")
+    photo_fid = plant.get("photo_file_id")
+    return PlantDetail(
+        id=plant["id"],
+        display_name=plant.get("display_name") or f"Растение #{plant['id']}",
+        plant_name=plant.get("plant_name"),
+        current_state=current_state,
+        state_emoji=STATE_EMOJI.get(current_state, "🌱"),
+        state_name=STATE_NAMES.get(current_state, "Здоровое"),
+        watering_interval=plant.get("watering_interval", 7),
+        last_watered=plant.get("last_watered"),
+        next_watering_date=plant.get("next_watering_date"),
+        needs_watering=bool(plant.get("needs_watering", False)),
+        water_status="",
+        photo_file_id=photo_fid,
+        photo_url=_plant_photo_url(photo_fid, 800),
+        saved_date=plant.get("saved_date"),
+        analysis=plant.get("analysis"),
+        current_streak=plant.get("current_streak", 0) or 0,
+        max_streak=plant.get("max_streak", 0) or 0,
+        fertilizing_enabled=bool(plant.get("fertilizing_enabled", False)),
+        fertilizing_interval=plant.get("fertilizing_interval"),
+        last_fertilized=plant.get("last_fertilized"),
+        next_fertilizing_date=plant.get("next_fertilizing_date"),
     )
 
 
@@ -91,32 +145,7 @@ async def get_plant(plant_id: int, user_id: int = Depends(get_current_user)):
     if not plant:
         raise HTTPException(status_code=404, detail="Растение не найдено")
 
-    current_state = plant.get("current_state", "healthy")
-    photo_fid = plant.get("photo_file_id")
-
-    return PlantDetail(
-        id=plant_id,
-        display_name=plant.get("display_name") or f"Растение #{plant_id}",
-        plant_name=plant.get("plant_name"),
-        current_state=current_state,
-        state_emoji=STATE_EMOJI.get(current_state, "🌱"),
-        state_name=STATE_NAMES.get(current_state, "Здоровое"),
-        watering_interval=plant.get("watering_interval", 7),
-        last_watered=plant.get("last_watered"),
-        next_watering_date=plant.get("next_watering_date"),
-        needs_watering=bool(plant.get("needs_watering", False)),
-        water_status="",
-        photo_file_id=photo_fid,
-        photo_url=_plant_photo_url(photo_fid, 800),
-        saved_date=plant.get("saved_date"),
-        analysis=plant.get("analysis"),
-        current_streak=plant.get("current_streak", 0) or 0,
-        max_streak=plant.get("max_streak", 0) or 0,
-        fertilizing_enabled=bool(plant.get("fertilizing_enabled", False)),
-        fertilizing_interval=plant.get("fertilizing_interval"),
-        last_fertilized=plant.get("last_fertilized"),
-        next_fertilizing_date=plant.get("next_fertilizing_date"),
-    )
+    return _plant_to_detail(plant)
 
 
 @router.post("/analyze", response_model=AnalysisResponse)
@@ -155,6 +184,8 @@ async def analyze_photo(
         "photo_bytes": image_bytes,
         "photo_file_id": photo_url or "app_photo_pending",
         "plant_name": result.get("plant_name", "Неизвестное растение"),
+        "latin_name": result.get("latin_name"),
+        "species_description": result.get("species_description"),
         "confidence": result.get("confidence", 0),
         "state_info": state_info,
         "watering_interval": result.get("watering_interval"),
@@ -165,6 +196,8 @@ async def analyze_photo(
         success=True,
         analysis=result["analysis"],
         plant_name=result.get("plant_name"),
+        latin_name=result.get("latin_name"),
+        species_description=result.get("species_description"),
         confidence=result.get("confidence"),
         watering_interval=result.get("watering_interval"),
         state=state_info.get("current_state", "healthy"),
@@ -200,42 +233,32 @@ async def save_plant(
 
     _app_temp_analyses.pop(req.temp_id, None)
 
-    # === Этап 9: проверяем достижения категории 'plants' ===
-    await check_and_unlock(user_id, category='plants')
+    # === Этап 9: достижения категории 'plants' (не валим флоу при ошибке) ===
+    await _safe_check_achievements(user_id, category='plants')
 
     # Возвращаем полный объект растения
     db = await get_db()
     plant = await db.get_plant_with_state(result["plant_id"], user_id)
 
     if not plant:
-        raise HTTPException(status_code=500, detail="Растение сохранено, но не загружено")
+        # Растение реально создано, но прочитать не получилось — отдадим
+        # минимальный валидный объект, чтобы клиент не упал и обновил список
+        logger.warning(
+            f"⚠️ Растение {result['plant_id']} сохранено, "
+            f"но get_plant_with_state вернул None"
+        )
+        return PlantDetail(
+            id=result["plant_id"],
+            display_name=analysis_data.get("plant_name") or f"Растение #{result['plant_id']}",
+            plant_name=analysis_data.get("plant_name"),
+            current_state="healthy",
+            state_emoji=STATE_EMOJI["healthy"],
+            state_name=STATE_NAMES["healthy"],
+            watering_interval=analysis_data.get("watering_interval") or 7,
+            saved_date=datetime.now(),
+        )
 
-    current_state = plant.get("current_state", "healthy")
-    photo_fid = plant.get("photo_file_id")
-
-    return PlantDetail(
-        id=plant["id"],
-        display_name=plant.get("display_name") or f"Растение #{plant['id']}",
-        plant_name=plant.get("plant_name"),
-        current_state=current_state,
-        state_emoji=STATE_EMOJI.get(current_state, "🌱"),
-        state_name=STATE_NAMES.get(current_state, "Здоровое"),
-        watering_interval=plant.get("watering_interval", 7),
-        last_watered=plant.get("last_watered"),
-        next_watering_date=plant.get("next_watering_date"),
-        needs_watering=bool(plant.get("needs_watering", False)),
-        water_status="",
-        photo_file_id=photo_fid,
-        photo_url=_plant_photo_url(photo_fid, 800),
-        saved_date=plant.get("saved_date"),
-        analysis=plant.get("analysis"),
-        current_streak=plant.get("current_streak", 0) or 0,
-        max_streak=plant.get("max_streak", 0) or 0,
-        fertilizing_enabled=bool(plant.get("fertilizing_enabled", False)),
-        fertilizing_interval=plant.get("fertilizing_interval"),
-        last_fertilized=plant.get("last_fertilized"),
-        next_fertilizing_date=plant.get("next_fertilizing_date"),
-    )
+    return _plant_to_detail(plant)
 
 
 @router.post("/{plant_id}/water", response_model=WaterPlantResponse)
@@ -246,9 +269,9 @@ async def water_single_plant(plant_id: int, user_id: int = Depends(get_current_u
     if not result["success"]:
         raise HTTPException(status_code=404, detail=result.get("error", "Растение не найдено"))
 
-    # === Этап 9: обновляем глобальный стрик + проверяем достижения ===
-    await update_global_watering_streak(user_id)
-    await check_and_unlock(user_id, category='water')
+    # === Этап 9: глобальный стрик + достижения (защищённо) ===
+    await _safe_update_global_streak(user_id)
+    await _safe_check_achievements(user_id, category='water')
 
     return WaterPlantResponse(
         success=True,
@@ -390,38 +413,13 @@ async def update_plant_photo(
     if not update_result["success"]:
         raise HTTPException(status_code=500, detail=update_result.get("error", "Ошибка обновления"))
 
-    # === Этап 9: инкремент фото + проверяем достижения ===
-    await increment_photo_count(user_id)
-    await check_and_unlock(user_id, category='photos')
+    # === Этап 9: инкремент фото + достижения (защищённо) ===
+    await _safe_increment_photo_count(user_id)
+    await _safe_check_achievements(user_id, category='photos')
 
     # Возвращаем обновлённое растение
     plant = await db.get_plant_with_state(plant_id, user_id)
-    current_state = plant.get("current_state", "healthy")
-    photo_fid = plant.get("photo_file_id")
-
-    return PlantDetail(
-        id=plant["id"],
-        display_name=plant.get("display_name") or f"Растение #{plant['id']}",
-        plant_name=plant.get("plant_name"),
-        current_state=current_state,
-        state_emoji=STATE_EMOJI.get(current_state, "🌱"),
-        state_name=STATE_NAMES.get(current_state, "Здоровое"),
-        watering_interval=plant.get("watering_interval", 7),
-        last_watered=plant.get("last_watered"),
-        next_watering_date=plant.get("next_watering_date"),
-        needs_watering=bool(plant.get("needs_watering", False)),
-        water_status="",
-        photo_file_id=photo_fid,
-        photo_url=_plant_photo_url(photo_fid, 800),
-        saved_date=plant.get("saved_date"),
-        analysis=plant.get("analysis"),
-        current_streak=plant.get("current_streak", 0) or 0,
-        max_streak=plant.get("max_streak", 0) or 0,
-        fertilizing_enabled=bool(plant.get("fertilizing_enabled", False)),
-        fertilizing_interval=plant.get("fertilizing_interval"),
-        last_fertilized=plant.get("last_fertilized"),
-        next_fertilizing_date=plant.get("next_fertilizing_date"),
-    )
+    return _plant_to_detail(plant)
 
 
 @router.post("/water-all", response_model=SuccessResponse)
@@ -432,8 +430,8 @@ async def water_all(user_id: int = Depends(get_current_user)):
     if not result["success"]:
         raise HTTPException(status_code=500, detail="Ошибка")
 
-    # === Этап 9: обновляем глобальный стрик + проверяем достижения ===
-    await update_global_watering_streak(user_id)
-    await check_and_unlock(user_id, category='water')
+    # === Этап 9: глобальный стрик + достижения (защищённо) ===
+    await _safe_update_global_streak(user_id)
+    await _safe_check_achievements(user_id, category='water')
 
     return SuccessResponse(message="Все растения политы")
