@@ -15,7 +15,7 @@ temp_analyses = {}
 async def save_analyzed_plant(user_id: int, analysis_data: dict, last_watered: datetime = None) -> dict:
     """
     Сохранение проанализированного растения (Этап 3).
-    Теперь пробрасываем fertilizing_enabled, fertilizing_interval и next_watering_date.
+    Записываем интервал полива и next_watering_date.
     """
     try:
         raw_analysis = analysis_data.get("analysis", "")
@@ -29,12 +29,6 @@ async def save_analyzed_plant(user_id: int, analysis_data: dict, last_watered: d
 
         ai_interval = max(3, min(28, ai_interval))
         logger.info(f"💧 Интервал полива: {ai_interval} дней")
-
-        # Подкормка
-        fertilizing_enabled = state_info.get('fertilizing_enabled', False)
-        fertilizing_interval = state_info.get('fertilizing_interval')
-
-        logger.info(f"🍽️ Подкормка: enabled={fertilizing_enabled}, interval={fertilizing_interval}")
 
         db = await get_db()
         plant_id = await db.save_plant(
@@ -57,36 +51,26 @@ async def save_analyzed_plant(user_id: int, analysis_data: dict, last_watered: d
             next_watering_days = max(1, ai_interval - days_since_watered)
             next_watering_date = today + timedelta(days=next_watering_days)
         else:
-            # Если не указано — считаем, что полили "сейчас" концептуально
+            # Если не указано, считаем что полили "сейчас" концептуально
             next_watering_date = today + timedelta(days=ai_interval)
 
-        # Записываем все поля разом
+        # Записываем next_watering_date и (если задан) last_watered
         async with db.pool.acquire() as conn:
-            params = [plant_id, ai_interval, next_watering_date, fertilizing_enabled]
-            sql = """
-                UPDATE plants
-                SET watering_interval = $2,
-                    next_watering_date = $3,
-                    fertilizing_enabled = $4
-            """
-            param_idx = 5
-
-            if fertilizing_interval:
-                sql += f", fertilizing_interval = ${param_idx}"
-                params.append(fertilizing_interval)
-                param_idx += 1
-                # next_fertilizing_date считаем от сегодня
-                sql += f", next_fertilizing_date = ${param_idx}"
-                params.append(today + timedelta(days=fertilizing_interval))
-                param_idx += 1
-
             if last_watered:
-                sql += f", last_watered = ${param_idx}"
-                params.append(last_watered)
-                param_idx += 1
-
-            sql += " WHERE id = $1"
-            await conn.execute(sql, *params)
+                await conn.execute("""
+                    UPDATE plants
+                    SET watering_interval = $2,
+                        next_watering_date = $3,
+                        last_watered = $4
+                    WHERE id = $1
+                """, plant_id, ai_interval, next_watering_date, last_watered)
+            else:
+                await conn.execute("""
+                    UPDATE plants
+                    SET watering_interval = $2,
+                        next_watering_date = $3
+                    WHERE id = $1
+                """, plant_id, ai_interval, next_watering_date)
 
         # Состояние
         current_state = state_info.get('current_state', 'healthy')
@@ -132,8 +116,6 @@ async def save_analyzed_plant(user_id: int, analysis_data: dict, last_watered: d
             "state_name": state_name,
             "interval": ai_interval,
             "next_watering_days": next_watering_days,
-            "fertilizing_enabled": fertilizing_enabled,
-            "fertilizing_interval": fertilizing_interval,
         }
 
     except Exception as e:
@@ -227,17 +209,13 @@ async def get_user_plants_list(user_id: int, limit: int = 15) -> list:
                 plant_data["emoji"] = STATE_EMOJI.get(current_state, '🌱')
                 plant_data["current_state"] = current_state
                 plant_data["water_status"] = format_days_ago(plant.get('last_watered'))
-                # Прокидываем все новые поля Этапа 3
+                # Прокидываем поля Этапа 3
                 plant_data["last_watered"] = plant.get('last_watered')
                 plant_data["watering_interval"] = plant.get('watering_interval', 7)
                 plant_data["next_watering_date"] = plant.get('next_watering_date')
                 plant_data["needs_watering"] = plant.get('needs_watering', False)
                 plant_data["current_streak"] = plant.get('current_streak', 0)
                 plant_data["max_streak"] = plant.get('max_streak', 0)
-                plant_data["fertilizing_enabled"] = plant.get('fertilizing_enabled', False)
-                plant_data["fertilizing_interval"] = plant.get('fertilizing_interval')
-                plant_data["last_fertilized"] = plant.get('last_fertilized')
-                plant_data["next_fertilizing_date"] = plant.get('next_fertilizing_date')
                 plant_data["plant_name"] = plant.get('plant_name')
                 plant_data["saved_date"] = plant.get('saved_date')
 
@@ -297,29 +275,8 @@ async def water_all_plants(user_id: int) -> dict:
 
 
 async def fertilize_plant_action(user_id: int, plant_id: int) -> dict:
-    """Подкормить растение (Этап 3)"""
-    try:
-        db = await get_db()
-        plant = await db.get_plant_by_id(plant_id, user_id)
-
-        if not plant:
-            return {"success": False, "error": "Растение не найдено"}
-
-        result = await db.fertilize_plant(user_id, plant_id)
-
-        if not result["success"]:
-            return result
-
-        return {
-            "success": True,
-            "plant_name": plant['display_name'],
-            "next_fertilizing_date": result["next_fertilizing_date"],
-            "interval": result["interval"],
-        }
-
-    except Exception as e:
-        logger.error(f"Ошибка подкормки: {e}", exc_info=True)
-        return {"success": False, "error": str(e)}
+    """Подкормка пока отключена. Заглушка для совместимости с роутерами/ботом."""
+    return {"success": False, "error": "Подкормка временно отключена"}
 
 
 async def delete_plant(user_id: int, plant_id: int) -> dict:
