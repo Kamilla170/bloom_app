@@ -1,5 +1,5 @@
 """
-Bloom AI REST API — точка входа
+Bloom AI REST API: точка входа
 Запуск: uvicorn api.main:app --host 0.0.0.0 --port 8001
 """
 
@@ -83,13 +83,27 @@ async def run_app_migrations():
 
         logger.info("✅ Миграция: аналитика и достижения (Этап 9)")
 
+        # --- ИИ чат: общий чат без растения ---
+        try:
+            await conn.execute(
+                "ALTER TABLE plant_qa_history ALTER COLUMN plant_id DROP NOT NULL"
+            )
+            await conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_plant_qa_history_user_general
+                ON plant_qa_history(user_id, question_date DESC)
+                WHERE plant_id IS NULL
+            """)
+            logger.info("✅ Миграция: общий чат без растения")
+        except Exception as e:
+            logger.info(f"Миграция общего чата уже выполнена: {e}")
+
 
 # === Lifecycle ===
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Инициализация при старте, очистка при завершении"""
-    logger.info("🚀 Bloom AI REST API — запуск...")
+    logger.info("🚀 Bloom AI REST API: запуск...")
     await init_database()
     await run_app_migrations()
 
@@ -99,7 +113,7 @@ async def lifespan(app: FastAPI):
 
     logger.info("✅ API готов к работе")
     yield
-    logger.info("🛑 API — завершение")
+    logger.info("🛑 API: завершение")
     try:
         db = await get_db()
         await db.close()
