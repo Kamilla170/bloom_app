@@ -211,7 +211,45 @@ class PlantDatabase:
                     FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE
                 )
             """)
-            
+
+            # === ТАБЛИЦА ИСТОРИИ ФОТО РАСТЕНИЯ ===
+            # Каждое обновление фото добавляет запись сюда.
+            # Используется на экране растения в секции "История растения".
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS plant_photos (
+                    id SERIAL PRIMARY KEY,
+                    plant_id INTEGER NOT NULL,
+                    user_id BIGINT NOT NULL,
+                    photo_url TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (plant_id) REFERENCES plants (id) ON DELETE CASCADE,
+                    FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE
+                )
+            """)
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_plant_photos_plant "
+                "ON plant_photos(plant_id, created_at DESC)"
+            )
+
+            # Бэк-миграция: для растений без записей в plant_photos
+            # создаём первую запись на основе текущего photo_file_id и saved_date.
+            # Это разово заполнит историю для уже существующих растений.
+            try:
+                await conn.execute("""
+                    INSERT INTO plant_photos (plant_id, user_id, photo_url, created_at)
+                    SELECT p.id, p.user_id, p.photo_file_id,
+                           COALESCE(p.saved_date, CURRENT_TIMESTAMP)
+                    FROM plants p
+                    WHERE p.photo_file_id IS NOT NULL
+                      AND p.photo_file_id <> ''
+                      AND NOT EXISTS (
+                          SELECT 1 FROM plant_photos pp WHERE pp.plant_id = p.id
+                      )
+                """)
+                logger.info("✅ Бэк-миграция plant_photos выполнена")
+            except Exception as e:
+                logger.warning(f"⚠️ Бэк-миграция plant_photos: {e}")
+
             # Остальные таблицы
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS growing_plants (
@@ -1023,7 +1061,31 @@ class PlantDatabase:
                 result['display_name'] = display_name
                 return result
             return None
-    
+
+    # === МЕТОДЫ ДЛЯ ИСТОРИИ ФОТО РАСТЕНИЯ ===
+
+    async def add_plant_photo(self, plant_id: int, user_id: int, photo_url: str) -> int:
+        """Добавить запись в историю фото растения."""
+        async with self.pool.acquire() as conn:
+            photo_id = await conn.fetchval("""
+                INSERT INTO plant_photos (plant_id, user_id, photo_url)
+                VALUES ($1, $2, $3)
+                RETURNING id
+            """, plant_id, user_id, photo_url)
+            return photo_id
+
+    async def get_plant_photos(self, plant_id: int, limit: int = 50) -> List[Dict]:
+        """Получить историю фото растения (новые сверху)."""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT id, plant_id, photo_url, created_at
+                FROM plant_photos
+                WHERE plant_id = $1
+                ORDER BY created_at DESC
+                LIMIT $2
+            """, plant_id, limit)
+            return [dict(row) for row in rows]
+
     async def get_user_plants(self, user_id: int, limit: int = 10) -> List[Dict]:
         """Получить все растения пользователя"""
         async with self.pool.acquire() as conn:
