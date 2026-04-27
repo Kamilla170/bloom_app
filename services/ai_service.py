@@ -97,6 +97,37 @@ def extract_plant_state_from_analysis(raw_analysis: str) -> dict:
     return state_info
 
 
+def extract_species_meta(raw_analysis: str) -> dict:
+    """
+    Извлечь латинское название и описание вида из анализа AI.
+    Возвращает: {'latin_name': str|None, 'species_description': str|None}
+    """
+    meta = {'latin_name': None, 'species_description': None}
+    if not raw_analysis:
+        return meta
+
+    for line in raw_analysis.split('\n'):
+        line = line.strip()
+
+        if line.startswith("НАЗВАНИЕ_ЛАТ:"):
+            value = line.replace("НАЗВАНИЕ_ЛАТ:", "").strip()
+            # Чистим возможные обёртки и заглушки
+            value = value.strip(' "\'[]()')
+            if value and value.lower() not in {'неизвестно', 'unknown', '-', 'нет', 'n/a'}:
+                meta['latin_name'] = value
+
+        elif line.startswith("ОПИСАНИЕ_ВИДА:"):
+            value = line.replace("ОПИСАНИЕ_ВИДА:", "").strip()
+            value = value.strip(' "\'')
+            if value and value.lower() not in {'неизвестно', 'unknown', '-', 'нет', 'n/a'}:
+                # Ограничим, чтобы случайно не утянуло всю простыню
+                if len(value) > 320:
+                    value = value[:317].rstrip() + '…'
+                meta['species_description'] = value
+
+    return meta
+
+
 def extract_watering_info(analysis_text: str) -> dict:
     """Извлечь информацию о поливе"""
     watering_info = {
@@ -160,6 +191,38 @@ def extract_and_remove_watering_interval(text: str, season_info: dict) -> tuple:
         logger.warning(f"⚠️ ПОЛИВ_ИНТЕРВАЛ не найден, default: {default_interval}")
 
     return interval, clean_text
+
+
+def _extract_plant_name_rus(raw_analysis: str) -> str:
+    """
+    Извлечь русское название растения.
+    Сначала ищем НАЗВАНИЕ_РУС: (новый формат), потом fallback на РАСТЕНИЕ:.
+    """
+    plant_name = "Неизвестное растение"
+
+    # Сначала ищем новый формат
+    for line in raw_analysis.split('\n'):
+        line = line.strip()
+        if line.startswith("НАЗВАНИЕ_РУС:"):
+            value = line.replace("НАЗВАНИЕ_РУС:", "").strip().strip(' "\'[]()')
+            if value and value.lower() not in {'неизвестно', 'unknown', '-', 'нет', 'n/a'}:
+                return value
+
+    # Fallback: старый формат "РАСТЕНИЕ:"
+    for line in raw_analysis.split('\n'):
+        line = line.strip()
+        if line.startswith("РАСТЕНИЕ:"):
+            raw_name = line.replace("РАСТЕНИЕ:", "").strip()
+            if "неизвестное растение" in raw_name.lower() and "(" in raw_name:
+                match = re.search(r'\((?:возможно,?\s*)?([^)]+)\)', raw_name, re.IGNORECASE)
+                plant_name = match.group(1).strip() if match else raw_name
+            else:
+                plant_name = re.sub(r'\s*\(возможно[^)]*\)\s*', '', raw_name, flags=re.IGNORECASE).strip() or raw_name
+            # Если в названии есть скобки с латынью — отрезаем их
+            plant_name = re.sub(r'\s*\([^)]*\)\s*', '', plant_name).strip() or plant_name
+            break
+
+    return plant_name
 
 
 async def analyze_vision_step(image_data: bytes, user_question: str = None, previous_state: str = None) -> dict:
@@ -338,24 +401,17 @@ async def analyze_with_openai_advanced(image_data: bytes, user_question: str = N
                     confidence = 70
                 break
 
-        plant_name = "Неизвестное растение"
-        for line in raw_analysis.split('\n'):
-            if line.startswith("РАСТЕНИЕ:"):
-                raw_name = line.replace("РАСТЕНИЕ:", "").strip()
-                if "неизвестное растение" in raw_name.lower() and "(" in raw_name:
-                    match = re.search(r'\((?:возможно,?\s*)?([^)]+)\)', raw_name, re.IGNORECASE)
-                    plant_name = match.group(1).strip() if match else raw_name
-                else:
-                    plant_name = re.sub(r'\s*\(возможно[^)]*\)\s*', '', raw_name, flags=re.IGNORECASE).strip() or raw_name
-                break
+        plant_name = _extract_plant_name_rus(raw_analysis)
 
         state_info = extract_plant_state_from_analysis(raw_analysis)
         watering_info = extract_watering_info(raw_analysis)
+        species_meta = extract_species_meta(raw_analysis)
 
         formatted_analysis = format_plant_analysis(raw_analysis, confidence, state_info)
 
         logger.info(
-            f"✅ Анализ: {plant_name}, состояние={state_info['current_state']}, "
+            f"✅ Анализ: {plant_name} [{species_meta.get('latin_name')}], "
+            f"состояние={state_info['current_state']}, "
             f"подкормка={state_info['fertilizing_enabled']} ({state_info['fertilizing_interval']}д)"
         )
 
@@ -364,6 +420,8 @@ async def analyze_with_openai_advanced(image_data: bytes, user_question: str = N
             "analysis": formatted_analysis,
             "raw_analysis": raw_analysis,
             "plant_name": plant_name,
+            "latin_name": species_meta.get('latin_name'),
+            "species_description": species_meta.get('species_description'),
             "confidence": confidence,
             "source": "openai_advanced",
             "state_info": state_info,
