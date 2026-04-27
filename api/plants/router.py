@@ -430,6 +430,9 @@ async def update_plant_photo(
     if not update_result["success"]:
         raise HTTPException(status_code=500, detail=update_result.get("error", "Ошибка обновления"))
 
+    # ===  ===
+    await db.add_plant_photo(plant_id, user_id, photo_url)
+    # ===========================
     # === Этап 9: инкремент фото + достижения (защищённо) ===
     await _safe_increment_photo_count(user_id)
     await _safe_check_achievements(user_id, category='photos')
