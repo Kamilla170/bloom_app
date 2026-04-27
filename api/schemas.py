@@ -111,6 +111,8 @@ class AnalysisResponse(BaseModel):
     success: bool
     analysis: Optional[str] = None
     plant_name: Optional[str] = None
+    latin_name: Optional[str] = None
+    species_description: Optional[str] = None
     confidence: Optional[float] = None
     watering_interval: Optional[int] = None
     state: Optional[str] = None
