@@ -69,14 +69,16 @@ async def _safe_increment_photo_count(user_id: int) -> None:
 
 
 def _plant_to_summary(p: dict) -> PlantSummary:
-    """Преобразовать запись из БД в PlantSummary"""
+    """Преобразовать запись из БД в PlantSummary (устойчиво к None)"""
+    pid = p.get("id")
+    state = p.get("current_state") or "healthy"
     return PlantSummary(
-        id=p["id"],
-        display_name=p.get("display_name") or p.get("plant_name") or f"Растение #{p['id']}",
+        id=pid,
+        display_name=p.get("display_name") or p.get("plant_name") or f"Растение #{pid}",
         plant_name=p.get("plant_name"),
-        current_state=p.get("current_state", "healthy"),
-        state_emoji=STATE_EMOJI.get(p.get("current_state", "healthy"), "🌱"),
-        watering_interval=p.get("watering_interval", 7),
+        current_state=state,
+        state_emoji=STATE_EMOJI.get(state, "🌱"),
+        watering_interval=p.get("watering_interval") or 7,
         last_watered=p.get("last_watered"),
         next_watering_date=p.get("next_watering_date"),
         needs_watering=bool(p.get("needs_watering", False)),
@@ -94,28 +96,29 @@ def _plant_to_summary(p: dict) -> PlantSummary:
 
 
 def _plant_to_detail(plant: dict) -> PlantDetail:
-    """Преобразовать запись из БД в PlantDetail"""
-    current_state = plant.get("current_state", "healthy")
+    """Преобразовать запись из БД в PlantDetail (устойчиво к None)"""
+    pid = plant.get("id")
+    current_state = plant.get("current_state") or "healthy"
     photo_fid = plant.get("photo_file_id")
     return PlantDetail(
-        id=plant["id"],
-        display_name=plant.get("display_name") or f"Растение #{plant['id']}",
+        id=pid,
+        display_name=plant.get("display_name") or plant.get("plant_name") or f"Растение #{pid}",
         plant_name=plant.get("plant_name"),
         current_state=current_state,
         state_emoji=STATE_EMOJI.get(current_state, "🌱"),
         state_name=STATE_NAMES.get(current_state, "Здоровое"),
-        watering_interval=plant.get("watering_interval", 7),
+        watering_interval=plant.get("watering_interval") or 7,
         last_watered=plant.get("last_watered"),
         next_watering_date=plant.get("next_watering_date"),
-        needs_watering=bool(plant.get("needs_watering", False)),
+        needs_watering=bool(plant.get("needs_watering") or False),
         water_status="",
         photo_file_id=photo_fid,
         photo_url=_plant_photo_url(photo_fid, 800),
         saved_date=plant.get("saved_date"),
         analysis=plant.get("analysis"),
-        current_streak=plant.get("current_streak", 0) or 0,
-        max_streak=plant.get("max_streak", 0) or 0,
-        fertilizing_enabled=bool(plant.get("fertilizing_enabled", False)),
+        current_streak=plant.get("current_streak") or 0,
+        max_streak=plant.get("max_streak") or 0,
+        fertilizing_enabled=bool(plant.get("fertilizing_enabled") or False),
         fertilizing_interval=plant.get("fertilizing_interval"),
         last_fertilized=plant.get("last_fertilized"),
         next_fertilizing_date=plant.get("next_fertilizing_date"),
@@ -236,29 +239,43 @@ async def save_plant(
     # === Этап 9: достижения категории 'plants' (не валим флоу при ошибке) ===
     await _safe_check_achievements(user_id, category='plants')
 
-    # Возвращаем полный объект растения
-    db = await get_db()
-    plant = await db.get_plant_with_state(result["plant_id"], user_id)
+    plant_id = result["plant_id"]
 
-    if not plant:
-        # Растение реально создано, но прочитать не получилось — отдадим
-        # минимальный валидный объект, чтобы клиент не упал и обновил список
+    # Bulletproof: что бы ни случилось при чтении/сборке PlantDetail —
+    # растение в БД уже есть, клиент должен получить 200 с валидным объектом,
+    # чтобы экран корректно закрылся и список обновился.
+    try:
+        db = await get_db()
+        plant = await db.get_plant_with_state(plant_id, user_id)
+        if plant:
+            return _plant_to_detail(plant)
+
         logger.warning(
-            f"⚠️ Растение {result['plant_id']} сохранено, "
-            f"но get_plant_with_state вернул None"
+            f"⚠️ Растение {plant_id} сохранено, но get_plant_with_state вернул None"
         )
-        return PlantDetail(
-            id=result["plant_id"],
-            display_name=analysis_data.get("plant_name") or f"Растение #{result['plant_id']}",
-            plant_name=analysis_data.get("plant_name"),
-            current_state="healthy",
-            state_emoji=STATE_EMOJI["healthy"],
-            state_name=STATE_NAMES["healthy"],
-            watering_interval=analysis_data.get("watering_interval") or 7,
-            saved_date=datetime.now(),
+    except Exception as e:
+        logger.error(
+            f"❌ Не удалось собрать PlantDetail для plant_id={plant_id}: {e}",
+            exc_info=True,
         )
 
-    return _plant_to_detail(plant)
+    # Fallback — минимальный валидный PlantDetail на основе того, что есть
+    state_info = analysis_data.get("state_info") or {}
+    current_state = state_info.get("current_state") or "healthy"
+    return PlantDetail(
+        id=plant_id,
+        display_name=analysis_data.get("plant_name") or f"Растение #{plant_id}",
+        plant_name=analysis_data.get("plant_name"),
+        current_state=current_state,
+        state_emoji=STATE_EMOJI.get(current_state, "🌱"),
+        state_name=STATE_NAMES.get(current_state, "Здоровое"),
+        watering_interval=analysis_data.get("watering_interval") or 7,
+        photo_file_id=analysis_data.get("photo_file_id"),
+        photo_url=_plant_photo_url(analysis_data.get("photo_file_id"), 800),
+        saved_date=datetime.now(),
+        fertilizing_enabled=bool(state_info.get("fertilizing_enabled") or False),
+        fertilizing_interval=state_info.get("fertilizing_interval"),
+    )
 
 
 @router.post("/{plant_id}/water", response_model=WaterPlantResponse)
