@@ -1536,9 +1536,9 @@ class PlantDatabase:
             
             return [dict(row) for row in rows]
     
-    async def save_qa_interaction(self, plant_id: int, user_id: int, question: str,
+    async def save_qa_interaction(self, plant_id: Optional[int], user_id: int, question: str,
                                  answer: str, context_used: dict = None) -> int:
-        """Сохранить вопрос-ответ"""
+        """Сохранить вопрос-ответ. plant_id=None для общего чата (без привязки к растению)"""
         async with self.pool.acquire() as conn:
             qa_id = await conn.fetchval("""
                 INSERT INTO plant_qa_history 
@@ -1561,6 +1561,18 @@ class PlantDatabase:
                 ORDER BY question_date DESC
                 LIMIT $2
             """, plant_id, limit)
+            
+            return [dict(row) for row in rows]
+    
+    async def get_user_chat_history(self, user_id: int, limit: int = 50) -> List[Dict]:
+        """Получить общую историю чата пользователя (без привязки к растению)"""
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT * FROM plant_qa_history
+                WHERE user_id = $1 AND plant_id IS NULL
+                ORDER BY question_date DESC
+                LIMIT $2
+            """, user_id, limit)
             
             return [dict(row) for row in rows]
     
