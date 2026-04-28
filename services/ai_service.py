@@ -6,7 +6,7 @@ from openai import AsyncOpenAI
 from config import OPENAI_API_KEY, PLANT_IDENTIFICATION_PROMPT, LEGACY_STATE_MAPPING
 from utils.image_utils import optimize_image_for_analysis
 from utils.formatters import format_plant_analysis
-from utils.season_utils import get_current_season, get_seasonal_care_tips
+from utils.season_utils import get_current_season
 
 logger = logging.getLogger(__name__)
 
@@ -242,7 +242,6 @@ async def analyze_with_openai_advanced(image_data: bytes, user_question: str = N
         base64_image = base64.b64encode(optimized).decode('utf-8')
 
         season_data = get_current_season()
-        season_tips = get_seasonal_care_tips()
 
         # Оценочная корректировка интервала по сезону
         water_adjustment_days = 0
