@@ -102,7 +102,7 @@ async def _get_user_stats(user_id: int) -> dict | None:
     db = await get_db()
     async with db.pool.acquire() as conn:
         user_row = await conn.fetchrow("""
-            SELECT total_waterings, total_photos, created_at
+            SELECT total_photos, created_at
             FROM users WHERE user_id = $1
         """, user_id)
 
@@ -110,18 +110,27 @@ async def _get_user_stats(user_id: int) -> dict | None:
             return None
 
         plant_count = await conn.fetchval(
-            "SELECT COUNT(*) FROM plants WHERE user_id = $1 AND plant_type = 'regular'",
+            "SELECT COUNT(*) FROM plants WHERE user_id = $1 "
+            "AND (plant_type = 'regular' OR plant_type IS NULL)",
             user_id
         )
 
-        # === % здоровых: healthy + flowering + growing, без needs_watering ===
+        # === % здоровых: healthy + flowering + growing, без срочных поливов ===
+        # Колонки needs_watering нет в plants — определяем по next_watering_date.
+        # Не пора поливать = next_watering_date >= сегодня (или вообще NULL).
         healthy_count = await conn.fetchval("""
             SELECT COUNT(*) FROM plants
             WHERE user_id = $1
-              AND plant_type = 'regular'
+              AND (plant_type = 'regular' OR plant_type IS NULL)
               AND current_state IN ('healthy', 'flowering', 'growing')
-              AND (needs_watering IS NULL OR needs_watering = false)
+              AND (next_watering_date IS NULL OR next_watering_date >= CURRENT_DATE)
         """, user_id)
+
+        # === Уникальные пары (plant, day) — наша новая "Серия полива" ===
+        unique_waterings = await conn.fetchval(
+            "SELECT COUNT(*) FROM daily_watering_log WHERE user_id = $1",
+            user_id
+        )
 
     now_moscow = datetime.now(MOSCOW_TZ)
     created_at = user_row['created_at']
@@ -130,7 +139,7 @@ async def _get_user_stats(user_id: int) -> dict | None:
     days_in_app = (now_moscow - created_at).days if created_at else 0
 
     return {
-        'total_waterings': user_row['total_waterings'] or 0,
+        'unique_waterings': unique_waterings or 0,
         'total_photos': user_row['total_photos'] or 0,
         'total_plants': plant_count or 0,
         'healthy_count': healthy_count or 0,
@@ -141,7 +150,7 @@ async def _get_user_stats(user_id: int) -> dict | None:
 def _current_value_for(achievement: dict, stats: dict) -> int:
     cat = achievement['category']
     if cat == 'water':
-        return stats['total_waterings']
+        return stats['unique_waterings']
     elif cat == 'plants':
         return stats['total_plants']
     elif cat == 'photos':
@@ -190,19 +199,18 @@ async def check_and_unlock(user_id: int, category: str = None) -> list:
 
 
 # =============================================
-# Глобальный счётчик поливов с дедупом
+# Учёт полива: дедуп уникальных пар (plant, day)
 # =============================================
 
 async def update_global_watering_streak(user_id: int, plant_id: int) -> bool:
     """
     Вызывать при каждом поливе одного растения.
 
-    Логика:
-      - INSERT в daily_watering_log (user_id, plant_id, today)
-      - Если CONFLICT (растение уже считалось сегодня) — выходим, ничего не меняем.
-      - Иначе — total_waterings += 1.
+    INSERT в daily_watering_log с ON CONFLICT DO NOTHING.
+    Если этот plant_id уже учтён сегодня — ничего не делает.
+    Поле users.total_waterings НЕ трогаем (там старая логика осталась).
 
-    Возвращает True, если запись новая (был учтён реальный полив).
+    Возвращает True, если запись новая.
     """
     from database import get_db
 
@@ -216,23 +224,13 @@ async def update_global_watering_streak(user_id: int, plant_id: int) -> bool:
             ON CONFLICT DO NOTHING
             RETURNING 1
         """, user_id, plant_id, today)
-
-        if inserted is None:
-            # Этот plant_id уже был учтён сегодня
-            return False
-
-        await conn.execute(
-            "UPDATE users SET total_waterings = total_waterings + 1 WHERE user_id = $1",
-            user_id
-        )
-        return True
+        return inserted is not None
 
 
 async def update_global_watering_streak_bulk(user_id: int, plant_ids: list) -> int:
     """
     Версия для water-all. Атомарно вставляет все (user, plant, today)
-    с ON CONFLICT DO NOTHING и инкрементит total_waterings ровно
-    на количество новых записей.
+    с ON CONFLICT DO NOTHING.
 
     Возвращает количество добавленных уникальных пар.
     """
@@ -252,15 +250,7 @@ async def update_global_watering_streak_bulk(user_id: int, plant_ids: list) -> i
             ON CONFLICT DO NOTHING
             RETURNING 1
         """, user_id, today, plant_ids)
-        added = len(rows)
-
-        if added > 0:
-            await conn.execute(
-                "UPDATE users SET total_waterings = total_waterings + $2 WHERE user_id = $1",
-                user_id, added
-            )
-
-    return added
+        return len(rows)
 
 
 # =============================================
@@ -320,9 +310,9 @@ async def get_analytics_data(user_id: int) -> dict | None:
     total = stats['total_plants']
     healthy_pct = round((stats['healthy_count'] / total * 100) if total > 0 else 0)
 
-    # === "Серия полива" = total_waterings (уникальные plant×day) ===
-    # Target = ближайшая невыполненная water-ачивка из WATER_ACHIEVEMENT_TARGETS.
-    waterings = stats['total_waterings']
+    # === "Серия полива" = unique_waterings (уникальные plant×day) ===
+    # Target = ближайшая невыполненная water-ачивка.
+    waterings = stats['unique_waterings']
     streak_target = WATER_ACHIEVEMENT_TARGETS[-1]
     for t in WATER_ACHIEVEMENT_TARGETS:
         if waterings < t:
