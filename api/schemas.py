@@ -121,6 +121,7 @@ class AnalysisResponse(BaseModel):
     error: Optional[str] = None
     temp_id: Optional[str] = None
     photo_url: Optional[str] = None
+    recommendations: Optional[str] = None
 
 
 class SavePlantRequest(BaseModel):
