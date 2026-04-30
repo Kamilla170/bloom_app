@@ -29,6 +29,7 @@ from api.services.cloudinary_service import upload_plant_photo, get_photo_url
 from config import STATE_EMOJI, STATE_NAMES
 from achievements import (
     update_global_watering_streak,
+    update_global_watering_streak_bulk,
     check_and_unlock,
     increment_photo_count,
 )
@@ -66,11 +67,18 @@ async def _safe_check_achievements(user_id: int, category: str) -> None:
         logger.warning(f"⚠️ check_and_unlock({category}) упал: {e}", exc_info=True)
 
 
-async def _safe_update_global_streak(user_id: int) -> None:
+async def _safe_update_global_streak(user_id: int, plant_id: int) -> None:
     try:
-        await update_global_watering_streak(user_id)
+        await update_global_watering_streak(user_id, plant_id)
     except Exception as e:
         logger.warning(f"⚠️ update_global_watering_streak упал: {e}", exc_info=True)
+
+
+async def _safe_update_global_streak_bulk(user_id: int, plant_ids: list[int]) -> None:
+    try:
+        await update_global_watering_streak_bulk(user_id, plant_ids)
+    except Exception as e:
+        logger.warning(f"⚠️ update_global_watering_streak_bulk упал: {e}", exc_info=True)
 
 
 async def _safe_increment_photo_count(user_id: int) -> None:
@@ -294,7 +302,7 @@ async def water_single_plant(plant_id: int, user_id: int = Depends(get_current_u
     if not result["success"]:
         raise HTTPException(status_code=404, detail=result.get("error", "Растение не найдено"))
 
-    await _safe_update_global_streak(user_id)
+    await _safe_update_global_streak(user_id, plant_id)
     await _safe_check_achievements(user_id, category='water')
 
     return WaterPlantResponse(
@@ -521,11 +529,24 @@ async def send_chat_photo(
 async def water_all(user_id: int = Depends(get_current_user)):
     """Полить все растения"""
     from services.plant_service import water_all_plants
+
+    # Берём список ВСЕХ regular-растений ДО полива.
+    # ON CONFLICT DO NOTHING в bulk-инсёрте защитит от двойного учёта тех,
+    # что уже были политы сегодня по отдельной кнопке.
+    db = await get_db()
+    async with db.pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT id FROM plants
+            WHERE user_id = $1
+              AND (plant_type = 'regular' OR plant_type IS NULL)
+        """, user_id)
+    plant_ids = [r['id'] for r in rows]
+
     result = await water_all_plants(user_id)
     if not result["success"]:
         raise HTTPException(status_code=500, detail="Ошибка")
 
-    await _safe_update_global_streak(user_id)
+    await _safe_update_global_streak_bulk(user_id, plant_ids)
     await _safe_check_achievements(user_id, category='water')
 
     return SuccessResponse(message="Все растения политы")
