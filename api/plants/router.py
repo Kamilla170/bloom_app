@@ -7,6 +7,8 @@ import uuid
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
+from pydantic import BaseModel
+from typing import Optional
 
 from database import get_db
 from api.auth.dependencies import get_current_user
@@ -15,7 +17,7 @@ from api.schemas import (
     AnalysisResponse, SavePlantRequest, WaterPlantResponse,
     UpdatePlantRequest, FertilizeResponse, PlantPhotoEntry, SuccessResponse,
 )
-from services.ai_service import analyze_plant_image
+from services.ai_service import analyze_plant_image, format_recommendations_text
 from services.plant_service import (
     save_analyzed_plant, get_user_plants_list,
     water_plant, delete_plant, rename_plant,
@@ -39,15 +41,25 @@ router = APIRouter(prefix="/plants", tags=["plants"])
 _app_temp_analyses: dict[str, dict] = {}
 
 
+# === Схема для ответа на отправку фото в чат ===
+
+class ChatPhotoMessageOut(BaseModel):
+    """Ответ на отправку фото в чате растения. Совпадает с ChatMessageOut в ai/router.py."""
+    id: int
+    question: str = ""
+    answer: str
+    created_at: str
+    plant_id: Optional[int] = None
+    plant_name: Optional[str] = None
+    photo_url: Optional[str] = None
+    message_type: str = "user_photo"
+
+
 def _plant_photo_url(photo_file_id: str | None, width: int = 400) -> str | None:
     return get_photo_url(photo_file_id, width)
 
 
 async def _safe_check_achievements(user_id: int, category: str) -> None:
-    """
-    Проверка достижений никогда не должна валить core-флоу.
-    Если внутри упадёт — просто логируем и идём дальше.
-    """
     try:
         await check_and_unlock(user_id, category=category)
     except Exception as e:
@@ -69,7 +81,6 @@ async def _safe_increment_photo_count(user_id: int) -> None:
 
 
 def _plant_to_summary(p: dict) -> PlantSummary:
-    """Преобразовать запись из БД в PlantSummary (устойчиво к None)"""
     pid = p.get("id")
     state = p.get("current_state") or "healthy"
     return PlantSummary(
@@ -96,7 +107,6 @@ def _plant_to_summary(p: dict) -> PlantSummary:
 
 
 def _plant_to_detail(plant: dict) -> PlantDetail:
-    """Преобразовать запись из БД в PlantDetail (устойчиво к None)"""
     pid = plant.get("id")
     current_state = plant.get("current_state") or "healthy"
     photo_fid = plant.get("photo_file_id")
@@ -178,6 +188,7 @@ async def analyze_photo(
     photo_url = await upload_plant_photo(image_bytes, user_id, plant_name_safe)
 
     state_info = result.get("state_info", {})
+    recommendations = result.get("recommendations") or format_recommendations_text(result.get("raw_analysis", ""))
 
     temp_id = str(uuid.uuid4())
     _app_temp_analyses[temp_id] = {
@@ -192,6 +203,7 @@ async def analyze_photo(
         "confidence": result.get("confidence", 0),
         "state_info": state_info,
         "watering_interval": result.get("watering_interval"),
+        "recommendations": recommendations,
         "created_at": datetime.now(),
     }
 
@@ -208,6 +220,7 @@ async def analyze_photo(
         fertilizing_interval=state_info.get("fertilizing_interval"),
         temp_id=temp_id,
         photo_url=photo_url,
+        recommendations=recommendations,
     )
 
 
@@ -236,14 +249,10 @@ async def save_plant(
 
     _app_temp_analyses.pop(req.temp_id, None)
 
-    # === Этап 9: достижения категории 'plants' (не валим флоу при ошибке) ===
     await _safe_check_achievements(user_id, category='plants')
 
     plant_id = result["plant_id"]
 
-    # Bulletproof: что бы ни случилось при чтении/сборке PlantDetail —
-    # растение в БД уже есть, клиент должен получить 200 с валидным объектом,
-    # чтобы экран корректно закрылся и список обновился.
     try:
         db = await get_db()
         plant = await db.get_plant_with_state(plant_id, user_id)
@@ -259,7 +268,6 @@ async def save_plant(
             exc_info=True,
         )
 
-    # Fallback — минимальный валидный PlantDetail на основе того, что есть
     state_info = analysis_data.get("state_info") or {}
     current_state = state_info.get("current_state") or "healthy"
     return PlantDetail(
@@ -286,7 +294,6 @@ async def water_single_plant(plant_id: int, user_id: int = Depends(get_current_u
     if not result["success"]:
         raise HTTPException(status_code=404, detail=result.get("error", "Растение не найдено"))
 
-    # === Этап 9: глобальный стрик + достижения (защищённо) ===
     await _safe_update_global_streak(user_id)
     await _safe_check_achievements(user_id, category='water')
 
@@ -303,18 +310,8 @@ async def water_single_plant(plant_id: int, user_id: int = Depends(get_current_u
 
 @router.post("/{plant_id}/fertilize", response_model=FertilizeResponse)
 async def fertilize_single_plant(plant_id: int, user_id: int = Depends(get_current_user)):
-    """Отметить подкормку растения"""
-    result = await fertilize_plant_action(user_id, plant_id)
-
-    if not result["success"]:
-        raise HTTPException(status_code=400, detail=result.get("error", "Ошибка"))
-
-    return FertilizeResponse(
-        success=True,
-        plant_name=result["plant_name"],
-        next_fertilizing_date=result["next_fertilizing_date"],
-        interval=result["interval"],
-    )
+    """Подкормка отключена. Эндпоинт оставлен для совместимости."""
+    raise HTTPException(status_code=400, detail="Подкормка временно отключена")
 
 
 @router.patch("/{plant_id}", response_model=SuccessResponse)
@@ -378,15 +375,15 @@ async def get_photos(plant_id: int, user_id: int = Depends(get_current_user)):
     ]
 
 
-@router.post("/{plant_id}/photo", response_model=PlantDetail)
-async def update_plant_photo(
+async def _process_photo_update(
     plant_id: int,
-    photo: UploadFile = File(...),
-    user_id: int = Depends(get_current_user),
-):
+    user_id: int,
+    image_bytes: bytes,
+    message_type: str,
+) -> tuple[dict, str, dict]:
     """
-    Обновить главное фото растения с переанализом.
-    Старое фото уезжает в plant_photos history.
+    Общий код для /photo и /chat-photo: лимит, анализ, апдейт состояния, plant_photos.
+    Возвращает: (analyze_result, photo_url, update_result).
     """
     allowed, error_msg = await check_limit(user_id, "analyses")
     if not allowed:
@@ -397,7 +394,6 @@ async def update_plant_photo(
     if not plant:
         raise HTTPException(status_code=404, detail="Растение не найдено")
 
-    image_bytes = await photo.read()
     if len(image_bytes) < 1000:
         raise HTTPException(status_code=400, detail="Файл слишком маленький")
     if len(image_bytes) > 20 * 1024 * 1024:
@@ -418,6 +414,7 @@ async def update_plant_photo(
         raise HTTPException(status_code=500, detail="Ошибка загрузки фото")
 
     state_info = result.get("state_info", {})
+    new_interval = result.get("watering_interval")
 
     update_result = await update_plant_state_from_photo(
         plant_id=plant_id,
@@ -425,21 +422,99 @@ async def update_plant_photo(
         photo_file_id=photo_url,
         state_info=state_info,
         raw_analysis=result.get("raw_analysis", ""),
+        new_watering_interval=new_interval,
+        message_type=message_type,
     )
 
     if not update_result["success"]:
         raise HTTPException(status_code=500, detail=update_result.get("error", "Ошибка обновления"))
 
-    # ===  ===
-    await db.add_plant_photo(plant_id, user_id, photo_url)
-    # ===========================
-    # === Этап 9: инкремент фото + достижения (защищённо) ===
+    # Кладём новое фото в plant_photos (история растения)
+    try:
+        await db.add_plant_photo(plant_id, user_id, photo_url)
+    except Exception as e:
+        logger.warning(f"⚠️ Не удалось добавить фото в plant_photos: {e}")
+
     await _safe_increment_photo_count(user_id)
     await _safe_check_achievements(user_id, category='photos')
 
-    # Возвращаем обновлённое растение
+    return result, photo_url, update_result
+
+
+@router.post("/{plant_id}/photo", response_model=PlantDetail)
+async def update_plant_photo(
+    plant_id: int,
+    photo: UploadFile = File(...),
+    user_id: int = Depends(get_current_user),
+):
+    """
+    Обновить главное фото растения с переанализом.
+    Внутри также пишет сообщение с фото и анализом в чат растения.
+    Используется кнопкой 'Обновить фото' в карточке.
+    """
+    image_bytes = await photo.read()
+    await _process_photo_update(
+        plant_id=plant_id,
+        user_id=user_id,
+        image_bytes=image_bytes,
+        message_type="auto_analysis",
+    )
+
+    db = await get_db()
     plant = await db.get_plant_with_state(plant_id, user_id)
     return _plant_to_detail(plant)
+
+
+@router.post("/{plant_id}/chat-photo", response_model=ChatPhotoMessageOut)
+async def send_chat_photo(
+    plant_id: int,
+    photo: UploadFile = File(...),
+    user_id: int = Depends(get_current_user),
+):
+    """
+    Отправить фото растения в чат.
+    Делает то же самое что /photo (анализ + обновление главного фото и состояния),
+    но возвращает новое сообщение чата (с фото пользователя и анализом ИИ).
+    """
+    image_bytes = await photo.read()
+    analyze_result, photo_url, update_result = await _process_photo_update(
+        plant_id=plant_id,
+        user_id=user_id,
+        image_bytes=image_bytes,
+        message_type="user_photo",
+    )
+
+    # Достаём только что записанное сообщение из plant_qa_history
+    db = await get_db()
+    history = await db.get_plant_qa_history(plant_id, limit=1)
+
+    if not history:
+        # Не должно случаться, но fallback на собранное сообщение
+        recommendations = update_result.get("recommendations") or analyze_result.get("recommendations") or ""
+        return ChatPhotoMessageOut(
+            id=0,
+            question="",
+            answer=recommendations,
+            created_at=datetime.now().isoformat(),
+            plant_id=plant_id,
+            plant_name=update_result.get("plant_name"),
+            photo_url=photo_url,
+            message_type="user_photo",
+        )
+
+    qa = history[0]
+    created = qa.get("question_date") or qa.get("created_at")
+
+    return ChatPhotoMessageOut(
+        id=qa.get("id", 0),
+        question=qa.get("question_text", "") or "",
+        answer=qa.get("answer_text", "") or "",
+        created_at=created.isoformat() if created else datetime.now().isoformat(),
+        plant_id=plant_id,
+        plant_name=update_result.get("plant_name"),
+        photo_url=photo_url,
+        message_type="user_photo",
+    )
 
 
 @router.post("/water-all", response_model=SuccessResponse)
@@ -450,7 +525,6 @@ async def water_all(user_id: int = Depends(get_current_user)):
     if not result["success"]:
         raise HTTPException(status_code=500, detail="Ошибка")
 
-    # === Этап 9: глобальный стрик + достижения (защищённо) ===
     await _safe_update_global_streak(user_id)
     await _safe_check_achievements(user_id, category='water')
 
