@@ -2,8 +2,12 @@
 Этап 9: Система достижений Bloom AI
 Справочник 20 достижений + логика проверки и разблокировки
 """
-from datetime import datetime, timedelta
+from datetime import datetime
 from config import MOSCOW_TZ, logger
+
+# Таргеты водных ачивок — используются и для разблокировки,
+# и для прогресса карточки "Серия полива" в аналитике.
+WATER_ACHIEVEMENT_TARGETS = [1, 10, 30, 60, 100]
 
 # =============================================
 # Справочник достижений (4 категории × 5)
@@ -98,9 +102,7 @@ async def _get_user_stats(user_id: int) -> dict | None:
     db = await get_db()
     async with db.pool.acquire() as conn:
         user_row = await conn.fetchrow("""
-            SELECT total_waterings, total_photos,
-                   global_watering_streak, global_max_watering_streak,
-                   last_global_watering_date, created_at
+            SELECT total_waterings, total_photos, created_at
             FROM users WHERE user_id = $1
         """, user_id)
 
@@ -108,11 +110,18 @@ async def _get_user_stats(user_id: int) -> dict | None:
             return None
 
         plant_count = await conn.fetchval(
-            "SELECT COUNT(*) FROM plants WHERE user_id = $1 AND plant_type = 'regular'", user_id
+            "SELECT COUNT(*) FROM plants WHERE user_id = $1 AND plant_type = 'regular'",
+            user_id
         )
-        healthy_count = await conn.fetchval(
-            "SELECT COUNT(*) FROM plants WHERE user_id = $1 AND current_state = 'healthy'", user_id
-        )
+
+        # === % здоровых: healthy + flowering + growing, без needs_watering ===
+        healthy_count = await conn.fetchval("""
+            SELECT COUNT(*) FROM plants
+            WHERE user_id = $1
+              AND plant_type = 'regular'
+              AND current_state IN ('healthy', 'flowering', 'growing')
+              AND (needs_watering IS NULL OR needs_watering = false)
+        """, user_id)
 
     now_moscow = datetime.now(MOSCOW_TZ)
     created_at = user_row['created_at']
@@ -126,8 +135,6 @@ async def _get_user_stats(user_id: int) -> dict | None:
         'total_plants': plant_count or 0,
         'healthy_count': healthy_count or 0,
         'days_in_app': days_in_app,
-        'global_watering_streak': user_row['global_watering_streak'] or 0,
-        'global_max_watering_streak': user_row['global_max_watering_streak'] or 0,
     }
 
 
@@ -183,51 +190,77 @@ async def check_and_unlock(user_id: int, category: str = None) -> list:
 
 
 # =============================================
-# Глобальный стрик полива (Duolingo-style)
+# Глобальный счётчик поливов с дедупом
 # =============================================
 
-async def update_global_watering_streak(user_id: int):
-    """Вызывать при каждом поливе."""
+async def update_global_watering_streak(user_id: int, plant_id: int) -> bool:
+    """
+    Вызывать при каждом поливе одного растения.
+
+    Логика:
+      - INSERT в daily_watering_log (user_id, plant_id, today)
+      - Если CONFLICT (растение уже считалось сегодня) — выходим, ничего не меняем.
+      - Иначе — total_waterings += 1.
+
+    Возвращает True, если запись новая (был учтён реальный полив).
+    """
     from database import get_db
 
     today = datetime.now(MOSCOW_TZ).date()
     db = await get_db()
 
     async with db.pool.acquire() as conn:
-        row = await conn.fetchrow("""
-            SELECT last_global_watering_date, global_watering_streak,
-                   global_max_watering_streak
-            FROM users WHERE user_id = $1
-        """, user_id)
-        if not row:
-            return
+        inserted = await conn.fetchval("""
+            INSERT INTO daily_watering_log (user_id, plant_id, watered_date)
+            VALUES ($1, $2, $3)
+            ON CONFLICT DO NOTHING
+            RETURNING 1
+        """, user_id, plant_id, today)
 
-        last_date = row['last_global_watering_date']
-        streak = row['global_watering_streak'] or 0
-        max_streak = row['global_max_watering_streak'] or 0
+        if inserted is None:
+            # Этот plant_id уже был учтён сегодня
+            return False
 
-        if last_date == today:
-            # Уже поливал сегодня — только инкремент total
+        await conn.execute(
+            "UPDATE users SET total_waterings = total_waterings + 1 WHERE user_id = $1",
+            user_id
+        )
+        return True
+
+
+async def update_global_watering_streak_bulk(user_id: int, plant_ids: list) -> int:
+    """
+    Версия для water-all. Атомарно вставляет все (user, plant, today)
+    с ON CONFLICT DO NOTHING и инкрементит total_waterings ровно
+    на количество новых записей.
+
+    Возвращает количество добавленных уникальных пар.
+    """
+    from database import get_db
+
+    if not plant_ids:
+        return 0
+
+    today = datetime.now(MOSCOW_TZ).date()
+    db = await get_db()
+
+    async with db.pool.acquire() as conn:
+        rows = await conn.fetch("""
+            INSERT INTO daily_watering_log (user_id, plant_id, watered_date)
+            SELECT $1, plant_id, $2
+            FROM unnest($3::int[]) AS t(plant_id)
+            ON CONFLICT DO NOTHING
+            RETURNING 1
+        """, user_id, today, plant_ids)
+        added = len(rows)
+
+        if added > 0:
             await conn.execute(
-                "UPDATE users SET total_waterings = total_waterings + 1 WHERE user_id = $1", user_id
+                "UPDATE users SET total_waterings = total_waterings + $2 WHERE user_id = $1",
+                user_id, added
             )
-            return
 
-        if last_date == today - timedelta(days=1):
-            streak += 1
-        else:
-            streak = 1
-
-        max_streak = max(max_streak, streak)
-
-        await conn.execute("""
-            UPDATE users
-            SET total_waterings = total_waterings + 1,
-                global_watering_streak = $2,
-                global_max_watering_streak = $3,
-                last_global_watering_date = $4
-            WHERE user_id = $1
-        """, user_id, streak, max_streak, today)
+    return added
 
 
 # =============================================
@@ -287,22 +320,28 @@ async def get_analytics_data(user_id: int) -> dict | None:
     total = stats['total_plants']
     healthy_pct = round((stats['healthy_count'] / total * 100) if total > 0 else 0)
 
-    streak = stats['global_watering_streak']
-    streak_targets = [7, 14, 21, 30, 50, 75, 100, 150, 200, 365]
-    streak_target = streak_targets[-1] + 50
-    for t in streak_targets:
-        if streak < t:
+    # === "Серия полива" = total_waterings (уникальные plant×day) ===
+    # Target = ближайшая невыполненная water-ачивка из WATER_ACHIEVEMENT_TARGETS.
+    waterings = stats['total_waterings']
+    streak_target = WATER_ACHIEVEMENT_TARGETS[-1]
+    for t in WATER_ACHIEVEMENT_TARGETS:
+        if waterings < t:
             streak_target = t
             break
+
+    streak_percent = (
+        round(min(waterings / streak_target * 100, 100))
+        if streak_target > 0 else 0
+    )
 
     return {
         'total_plants': total,
         'healthy_percent': healthy_pct,
         'watering_streak': {
-            'current': streak,
-            'max': stats['global_max_watering_streak'],
+            'current': waterings,
+            'max': waterings,  # сохраняем поле для совместимости фронта
             'target': streak_target,
-            'percent': round(min(streak / streak_target * 100, 100)) if streak_target > 0 else 0,
+            'percent': streak_percent,
         },
         'achievements': achievements,
         'unlocked_count': len(unlocked_map),
