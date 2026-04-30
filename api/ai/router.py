@@ -2,6 +2,7 @@
 Эндпоинты для ИИ-вопросов о растениях
 """
 
+import json
 import logging
 from typing import List, Optional
 
@@ -10,7 +11,7 @@ from pydantic import BaseModel
 
 from api.auth.dependencies import get_current_user
 from api.schemas import QuestionRequest, QuestionResponse
-from services.ai_service import answer_plant_question
+from services.ai_service import answer_plant_question, is_offtopic_refusal
 from services.subscription_service import check_limit, increment_usage
 from plant_memory import get_plant_context, save_interaction
 from database import get_db
@@ -29,6 +30,8 @@ class ChatMessageOut(BaseModel):
     created_at: str  # ISO datetime
     plant_id: Optional[int] = None
     plant_name: Optional[str] = None
+    photo_url: Optional[str] = None
+    message_type: str = "qa"  # qa | auto_analysis | user_photo
 
 
 class ChatHistoryResponse(BaseModel):
@@ -36,17 +39,45 @@ class ChatHistoryResponse(BaseModel):
     total: int
 
 
+def _parse_context_used(raw) -> dict:
+    """
+    context_used в БД хранится как JSONB. asyncpg может вернуть его как dict
+    или как str (зависит от настроек). Безопасно достаём.
+    """
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except Exception:
+            return {}
+    return {}
+
+
 def _qa_row_to_message(qa: dict, plant_name: Optional[str] = None) -> Optional[ChatMessageOut]:
     """Преобразование строки plant_qa_history в ChatMessageOut"""
     try:
         created = qa.get("question_date") or qa.get("created_at")
+        ctx = _parse_context_used(qa.get("context_used"))
+
+        photo_url = ctx.get("photo_url") if isinstance(ctx, dict) else None
+        msg_type = ctx.get("type") if isinstance(ctx, dict) else None
+        if msg_type not in {"qa", "auto_analysis", "user_photo"}:
+            # Если type не указан, выводим тип из question_text
+            question_text = qa.get("question_text") or ""
+            msg_type = "auto_analysis" if not question_text.strip() else "qa"
+
         return ChatMessageOut(
             id=qa.get("id", 0),
-            question=qa.get("question_text", ""),
-            answer=qa.get("answer_text", ""),
+            question=qa.get("question_text", "") or "",
+            answer=qa.get("answer_text", "") or "",
             created_at=created.isoformat() if created else "",
             plant_id=qa.get("plant_id"),
             plant_name=plant_name,
+            photo_url=photo_url,
+            message_type=msg_type,
         )
     except Exception as e:
         logger.error(f"Ошибка форматирования сообщения: {e}")
@@ -88,7 +119,6 @@ async def get_plant_chat_history(
     """Получить историю чата по конкретному растению"""
     db = await get_db()
 
-    # Проверяем, что растение принадлежит пользователю
     plant = await db.get_plant_with_state(plant_id, user_id)
     if not plant:
         raise HTTPException(status_code=404, detail="Растение не найдено")
@@ -116,12 +146,10 @@ async def ask_question(
     user_id: int = Depends(get_current_user),
 ):
     """Задать вопрос ИИ о растении (или без растения: общий чат)"""
-    # Проверяем лимит
     allowed, error_msg = await check_limit(user_id, "questions")
     if not allowed:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=error_msg)
 
-    # Загружаем контекст растения если указано
     context_text = ""
     plant_name = None
 
@@ -134,7 +162,6 @@ async def ask_question(
         plant_name = plant.get("display_name")
         context_text = await get_plant_context(req.plant_id, user_id, focus="general")
 
-    # Получаем ответ от AI
     answer = await answer_plant_question(req.question, context_text)
 
     if isinstance(answer, dict):
@@ -153,25 +180,34 @@ async def ask_question(
             error="Не удалось сформировать ответ. Попробуйте переформулировать.",
         )
 
-    # Увеличиваем счётчик
+    # Off-topic: ИИ отказался отвечать. НЕ списываем лимит, НЕ сохраняем в чат.
+    if is_offtopic_refusal(answer_text):
+        return QuestionResponse(
+            success=True,
+            answer=answer_text,
+            model=model_name,
+            plant_name=plant_name,
+        )
+
+    # Обычный ответ: списываем лимит, сохраняем
     await increment_usage(user_id, "questions")
 
-    # Сохраняем взаимодействие
     if req.plant_id:
-        # С растением: используем save_interaction (она пишет в plant_memory + БД)
         await save_interaction(
             req.plant_id, user_id, req.question, answer_text,
-            context_used={"context_length": len(context_text)},
+            context_used={
+                "type": "qa",
+                "context_length": len(context_text),
+            },
         )
     else:
-        # Без растения: пишем напрямую в БД с plant_id=NULL
         db = await get_db()
         await db.save_qa_interaction(
             plant_id=None,
             user_id=user_id,
             question=req.question,
             answer=answer_text,
-            context_used=None,
+            context_used={"type": "qa"},
         )
 
     return QuestionResponse(
