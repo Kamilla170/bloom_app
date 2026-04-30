@@ -250,6 +250,23 @@ class PlantDatabase:
             except Exception as e:
                 logger.warning(f"⚠️ Бэк-миграция plant_photos: {e}")
 
+            # === ТАБЛИЦА ДЕДУПА ПОЛИВОВ (Этап 9.5) ===
+            # Одна запись на (user, plant, day). INSERT ... ON CONFLICT DO NOTHING
+            # гарантирует, что повторный полив того же растения в тот же день
+            # не учитывается дважды для ачивок и карточки "Серия полива".
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS daily_watering_log (
+                    user_id       BIGINT  NOT NULL,
+                    plant_id      INTEGER NOT NULL,
+                    watered_date  DATE    NOT NULL,
+                    PRIMARY KEY (user_id, plant_id, watered_date)
+                )
+            """)
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_daily_watering_log_user "
+                "ON daily_watering_log(user_id)"
+            )
+
             # Остальные таблицы
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS growing_plants (
@@ -417,6 +434,8 @@ class PlantDatabase:
                 await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS plants_count INTEGER DEFAULT 0")
                 await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS total_waterings INTEGER DEFAULT 0")
                 await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS questions_asked INTEGER DEFAULT 0")
+                # Этап 9: счётчик загруженных фото для ачивок категории 'photos'
+                await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS total_photos INTEGER DEFAULT 0")
                 # Флаги контекстных подсказок онбординга
                 await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS tip_analysis_shown BOOLEAN DEFAULT FALSE")
                 await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS tip_save_shown BOOLEAN DEFAULT FALSE")
