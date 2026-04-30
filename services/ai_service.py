@@ -17,6 +17,10 @@ GPT_5_1_MODEL = "gpt-5.1-2025-11-13"
 # Допустимые статусы Этапа 3
 ALLOWED_STATES = {'healthy', 'flowering', 'growing', 'needs_care', 'dormancy'}
 
+# Фраза-отказ для off-topic вопросов в чате. Используется на роутере, чтобы
+# не списывать лимит вопросов с пользователя если ИИ отказал отвечать.
+OFFTOPIC_REFUSAL_PHRASE = "Я отвечаю только на вопросы о растениях"
+
 
 def _normalize_state(state_text: str) -> str:
     """Нормализация статуса с учётом старых значений и алиасов"""
@@ -111,7 +115,6 @@ def extract_species_meta(raw_analysis: str) -> dict:
 
         if line.startswith("НАЗВАНИЕ_ЛАТ:"):
             value = line.replace("НАЗВАНИЕ_ЛАТ:", "").strip()
-            # Чистим возможные обёртки и заглушки
             value = value.strip(' "\'[]()')
             if value and value.lower() not in {'неизвестно', 'unknown', '-', 'нет', 'n/a'}:
                 meta['latin_name'] = value
@@ -120,7 +123,6 @@ def extract_species_meta(raw_analysis: str) -> dict:
             value = line.replace("ОПИСАНИЕ_ВИДА:", "").strip()
             value = value.strip(' "\'')
             if value and value.lower() not in {'неизвестно', 'unknown', '-', 'нет', 'n/a'}:
-                # Ограничим, чтобы случайно не утянуло всю простыню
                 if len(value) > 320:
                     value = value[:317].rstrip() + '…'
                 meta['species_description'] = value
@@ -217,50 +219,74 @@ def _extract_plant_name_rus(raw_analysis: str) -> str:
                 match = re.search(r'\((?:возможно,?\s*)?([^)]+)\)', raw_name, re.IGNORECASE)
                 plant_name = match.group(1).strip() if match else raw_name
             else:
-                # Берём только русскую часть до латыни/скобок
-                cleaned = raw_name
-                latin_match = re.search(r'\b[A-Z][a-z]+\b', cleaned)
-                if latin_match:
-                    cleaned = cleaned[:latin_match.start()].strip(' (-,')
-                paren_match = cleaned.find('(')
-                if paren_match > 0:
-                    cleaned = cleaned[:paren_match].strip()
-                plant_name = cleaned or raw_name
+                # Из "Фикус каучуконосный (Ficus elastica)" оставим "Фикус каучуконосный"
+                plant_name = re.split(r'[(\[]', raw_name)[0].strip()
             break
 
     return plant_name
 
 
+def format_recommendations_text(raw_analysis: str) -> str:
+    """
+    Собрать читаемый markdown с рекомендациями для пользователя.
+    Извлекает СОСТОЯНИЕ, ПОЛИВ_РЕКОМЕНДАЦИИ, СВЕТ, ТЕМПЕРАТУРА, ВЛАЖНОСТЬ, СОВЕТ
+    из raw_analysis и собирает короткий markdown.
+    """
+    if not raw_analysis:
+        return ""
+
+    # Порядок важен — он сохраняется в выводе
+    fields = [
+        ("СОСТОЯНИЕ", "Состояние"),
+        ("ПОЛИВ_РЕКОМЕНДАЦИИ", "Полив"),
+        ("СВЕТ", "Свет"),
+        ("ТЕМПЕРАТУРА", "Температура"),
+        ("ВЛАЖНОСТЬ", "Влажность"),
+        ("СОВЕТ", "Совет"),
+    ]
+
+    placeholders = {'-', 'нет', 'неизвестно', 'unknown', 'n/a', '—'}
+
+    parts = []
+    for key, label in fields:
+        value = None
+        for line in raw_analysis.split("\n"):
+            stripped = line.strip()
+            if stripped.startswith(f"{key}:"):
+                value = stripped[len(key) + 1:].strip()
+                break
+        if value and value.lower() not in placeholders:
+            parts.append(f"**{label}.** {value}")
+
+    return "\n\n".join(parts)
+
+
 async def analyze_with_openai_advanced(image_data: bytes, user_question: str = None,
-                                       previous_state: str = None) -> dict:
-    """Расширенный анализ через OpenAI с единым промптом"""
+                                        previous_state: str = None) -> dict:
+    """Анализ через OpenAI с единым промптом."""
     if not openai_client:
-        return {"success": False, "error": "OpenAI API недоступен"}
+        return {"success": False, "error": "❌ OpenAI API недоступен"}
 
     try:
-        optimized = await optimize_image_for_analysis(image_data)
-        base64_image = base64.b64encode(optimized).decode('utf-8')
+        optimized_image = optimize_image_for_analysis(image_data)
+        base64_image = base64.b64encode(optimized_image).decode('utf-8')
 
         season_data = get_current_season()
 
-        # Оценочная корректировка интервала по сезону
-        water_adjustment_days = 0
-        season = season_data.get('season')
-        if season == 'winter':
-            water_adjustment_days = 6
-        elif season == 'spring':
-            water_adjustment_days = 1
-        elif season == 'summer':
-            water_adjustment_days = -2
-        elif season == 'autumn':
-            water_adjustment_days = 2
-
         feeding_recommendations = {
-            'winter': 'Зимой подкормка обычно НЕ нужна для большинства растений',
-            'spring': 'Весной начинаем активные подкормки каждые 14-21 дней',
-            'summer': 'Летом подкормки каждые 14-21 дней для активного роста',
-            'autumn': 'Осенью постепенно сокращаем подкормки до 30-45 дней',
+            'spring': 'Каждые 14 дней',
+            'summer': 'Каждые 14 дней',
+            'autumn': 'Каждые 21 день',
+            'winter': 'Не подкармливать или раз в 30-45 дней'
         }
+
+        water_adjustment_days = 0
+        if season_data['season'] == 'winter':
+            water_adjustment_days = 5
+        elif season_data['season'] == 'summer':
+            water_adjustment_days = -2
+        elif season_data['season'] == 'autumn':
+            water_adjustment_days = 2
 
         prompt = PLANT_IDENTIFICATION_PROMPT.format(
             season_name=season_data['season_ru'],
@@ -312,6 +338,7 @@ async def analyze_with_openai_advanced(image_data: bytes, user_question: str = N
         state_info = extract_plant_state_from_analysis(raw_analysis)
         watering_info = extract_watering_info(raw_analysis)
         species_meta = extract_species_meta(raw_analysis)
+        recommendations = format_recommendations_text(raw_analysis)
 
         formatted_analysis = format_plant_analysis(raw_analysis, confidence, state_info)
 
@@ -332,6 +359,7 @@ async def analyze_with_openai_advanced(image_data: bytes, user_question: str = N
             "source": "openai_advanced",
             "state_info": state_info,
             "watering_interval": watering_info["interval_days"],
+            "recommendations": recommendations,
             "season_data": season_data
         }
 
@@ -353,10 +381,13 @@ async def analyze_plant_image(image_data: bytes, user_question: str = None,
     result = await analyze_with_openai_advanced(image_data, user_question, previous_state)
 
     if result["success"]:
-        # Гарантируем, что watering_interval и поля подкормки попадут наверх
         if 'watering_interval' not in result:
             watering_info = extract_watering_info(result.get('raw_analysis', ''))
             result['watering_interval'] = watering_info['interval_days']
+
+        # Гарантируем наличие recommendations
+        if 'recommendations' not in result or not result['recommendations']:
+            result['recommendations'] = format_recommendations_text(result.get('raw_analysis', ''))
 
         result['needs_retry'] = result.get('confidence', 50) < 50
         return result
@@ -378,9 +409,21 @@ async def answer_plant_question(question: str, plant_context: str = None) -> dic
 КОРРЕКТИРОВКА ПОЛИВА: {season_info['watering_adjustment']}
 """
 
-        system_prompt = """Вы - опытный ботаник-консультант. Отвечайте на вопросы естественно и по существу.
+        # ЖЁСТКОЕ ОГРАНИЧЕНИЕ ТЕМАТИКИ.
+        # Любой вопрос не про растения должен получать ровно одну фразу-отказ.
+        system_prompt = f"""Вы - опытный ботаник-консультант приложения Bloom AI. Помогаете пользователям с уходом за комнатными и садовыми растениями.
 
-ПРАВИЛА:
+ОГРАНИЧЕНИЕ ТЕМАТИКИ - КРИТИЧЕСКИ ВАЖНО:
+Вы отвечаете ТОЛЬКО на вопросы о растениях, ботанике, садоводстве, уходе за комнатными и садовыми растениями, цветах, овощах, фруктах, грунтах, удобрениях, болезнях растений и вредителях.
+
+Если вопрос НЕ относится к растениям (например: программирование, история, политика, отношения, спорт, рецепты блюд без упоминания растений, общие темы), отвечайте РОВНО одной фразой и больше НИЧЕГО:
+"{OFFTOPIC_REFUSAL_PHRASE}. Что вас интересует про ваши зелёные питомцы?"
+
+Не пытайтесь шутить, не извиняйтесь, не объясняйте почему отказываете. Только эта одна фраза.
+
+Если вопрос двусмысленный (например про "уход" - но непонятно за чем), уточните что речь про растения - и попробуйте ответить как если бы это было о растении.
+
+ПРАВИЛА ОТВЕТОВ ПО ТЕМЕ РАСТЕНИЙ:
 - Отвечайте именно на тот вопрос, который задан
 - Простой вопрос: короткий ответ (3-5 предложений)
 - Сложный вопрос: можно структурировать
@@ -434,6 +477,13 @@ async def answer_plant_question(question: str, plant_context: str = None) -> dic
     except Exception as e:
         logger.error(f"❌ Ошибка ответа: {e}", exc_info=True)
         return {"error": "❌ Не могу дать ответ. Попробуйте переформулировать вопрос."}
+
+
+def is_offtopic_refusal(answer_text: str) -> bool:
+    """Проверка: содержит ли ответ ИИ отказную фразу для off-topic вопроса."""
+    if not answer_text:
+        return False
+    return OFFTOPIC_REFUSAL_PHRASE.lower() in answer_text.lower()
 
 
 async def generate_growing_plan(plant_name: str) -> tuple:
