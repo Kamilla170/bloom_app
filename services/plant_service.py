@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime, timedelta
 from database import get_db
-from services.ai_service import extract_watering_info
+from services.ai_service import extract_watering_info, format_recommendations_text
 from services.reminder_service import create_plant_reminder
 from utils.time_utils import get_moscow_now, format_days_ago
 from config import STATE_EMOJI, STATE_NAMES
@@ -12,10 +12,47 @@ logger = logging.getLogger(__name__)
 temp_analyses = {}
 
 
+async def _post_chat_auto_message(
+    plant_id: int,
+    user_id: int,
+    photo_url: str,
+    answer_text: str,
+    message_type: str,
+) -> None:
+    """
+    Записать системное сообщение от ИИ в plant_qa_history.
+    Используется при добавлении растения и при обновлении фото.
+
+    message_type:
+        'auto_analysis' - первоначальный анализ или обновление фото из карточки
+        'user_photo' - фото отправлено пользователем в чате (анализ ответ)
+    """
+    try:
+        if not answer_text or not answer_text.strip():
+            return
+        db = await get_db()
+        await db.save_qa_interaction(
+            plant_id=plant_id,
+            user_id=user_id,
+            question="",
+            answer=answer_text,
+            context_used={
+                "type": message_type,
+                "photo_url": photo_url,
+            },
+        )
+    except Exception as e:
+        # Не должно валить core-флоу
+        logger.warning(f"⚠️ Не удалось записать авто-сообщение в чат: {e}", exc_info=True)
+
+
 async def save_analyzed_plant(user_id: int, analysis_data: dict, last_watered: datetime = None) -> dict:
     """
     Сохранение проанализированного растения (Этап 3).
     Записываем интервал полива и next_watering_date.
+    Также:
+      - сохраняем первое фото в plant_photos
+      - пишем первое сообщение в plant_qa_history (анализ + рекомендации)
     """
     try:
         raw_analysis = analysis_data.get("analysis", "")
@@ -51,10 +88,8 @@ async def save_analyzed_plant(user_id: int, analysis_data: dict, last_watered: d
             next_watering_days = max(1, ai_interval - days_since_watered)
             next_watering_date = today + timedelta(days=next_watering_days)
         else:
-            # Если не указано, считаем что полили "сейчас" концептуально
             next_watering_date = today + timedelta(days=ai_interval)
 
-        # Записываем next_watering_date и (если задан) last_watered
         async with db.pool.acquire() as conn:
             if last_watered:
                 await conn.execute("""
@@ -98,6 +133,26 @@ async def save_analyzed_plant(user_id: int, analysis_data: dict, last_watered: d
             lighting_advice=None
         )
 
+        # Сохраняем первое фото в plant_photos (история растения)
+        photo_url = analysis_data.get("photo_file_id")
+        if photo_url and (photo_url.startswith("http") or photo_url.startswith("/")):
+            try:
+                await db.add_plant_photo(plant_id, user_id, photo_url)
+                logger.info(f"📸 Первое фото сохранено в plant_photos для растения {plant_id}")
+            except Exception as e:
+                logger.warning(f"⚠️ Не удалось сохранить первое фото в plant_photos: {e}")
+
+        # Пишем первое сообщение в чат растения (анализ + рекомендации)
+        recommendations_text = analysis_data.get("recommendations") or format_recommendations_text(raw_analysis)
+        if recommendations_text:
+            await _post_chat_auto_message(
+                plant_id=plant_id,
+                user_id=user_id,
+                photo_url=photo_url,
+                answer_text=recommendations_text,
+                message_type="auto_analysis",
+            )
+
         # Напоминание
         await create_plant_reminder(plant_id, user_id, next_watering_days)
 
@@ -125,10 +180,19 @@ async def save_analyzed_plant(user_id: int, analysis_data: dict, last_watered: d
 
 async def update_plant_state_from_photo(plant_id: int, user_id: int,
                                         photo_file_id: str, state_info: dict,
-                                        raw_analysis: str) -> dict:
+                                        raw_analysis: str,
+                                        new_watering_interval: int = None,
+                                        message_type: str = "auto_analysis") -> dict:
     """
     Обновление состояния растения по новому фото (Этап 3).
     Старое главное фото уезжает в plant_photos history.
+    Также:
+      - корректирует watering_interval если передан
+      - пишет сообщение в plant_qa_history (анализ + рекомендации)
+
+    message_type:
+        'auto_analysis' - обновление фото из карточки растения
+        'user_photo' - фото отправлено пользователем в чате
     """
     try:
         db = await get_db()
@@ -142,7 +206,7 @@ async def update_plant_state_from_photo(plant_id: int, user_id: int,
         state_reason = state_info.get('state_reason', 'Анализ AI')
         state_changed = (new_state != previous_state)
 
-        # Старое фото → в историю (если это URL)
+        # Старое фото в историю
         old_photo = plant.get('photo_file_id')
         if old_photo and old_photo.startswith('http'):
             try:
@@ -161,21 +225,58 @@ async def update_plant_state_from_photo(plant_id: int, user_id: int,
             ai_analysis=raw_analysis,
         )
 
-        # Обновляем главное фото и дату последнего анализа
+        # Обновляем главное фото и дату последнего анализа.
+        # Если переданы новые рекомендации по интервалу полива, корректируем.
         async with db.pool.acquire() as conn:
-            await conn.execute("""
-                UPDATE plants 
-                SET last_photo_analysis = CURRENT_TIMESTAMP,
-                    photo_file_id = $1
-                WHERE id = $2
-            """, photo_file_id, plant_id)
+            if new_watering_interval and 3 <= new_watering_interval <= 28:
+                # Корректируем watering_interval и пересчитываем next_watering_date
+                last_watered = plant.get('last_watered')
+                today = datetime.now().date()
+                if last_watered:
+                    days_since_watered = (datetime.now() - last_watered).days
+                    next_days = max(1, new_watering_interval - days_since_watered)
+                    next_date = today + timedelta(days=next_days)
+                else:
+                    next_date = today + timedelta(days=new_watering_interval)
+
+                await conn.execute("""
+                    UPDATE plants
+                    SET last_photo_analysis = CURRENT_TIMESTAMP,
+                        photo_file_id = $1,
+                        watering_interval = $2,
+                        next_watering_date = $3
+                    WHERE id = $4
+                """, photo_file_id, new_watering_interval, next_date, plant_id)
+                logger.info(
+                    f"💧 Интервал полива обновлён по новому фото: "
+                    f"{plant.get('watering_interval')} -> {new_watering_interval} дн."
+                )
+            else:
+                await conn.execute("""
+                    UPDATE plants
+                    SET last_photo_analysis = CURRENT_TIMESTAMP,
+                        photo_file_id = $1
+                    WHERE id = $2
+                """, photo_file_id, plant_id)
+
+        # Пишем сообщение в чат растения с анализом
+        recommendations_text = format_recommendations_text(raw_analysis)
+        if recommendations_text:
+            await _post_chat_auto_message(
+                plant_id=plant_id,
+                user_id=user_id,
+                photo_url=photo_file_id,
+                answer_text=recommendations_text,
+                message_type=message_type,
+            )
 
         return {
             "success": True,
             "state_changed": state_changed,
             "previous_state": previous_state,
             "new_state": new_state,
-            "plant_name": plant['display_name']
+            "plant_name": plant['display_name'],
+            "recommendations": recommendations_text,
         }
 
     except Exception as e:
@@ -209,7 +310,6 @@ async def get_user_plants_list(user_id: int, limit: int = 15) -> list:
                 plant_data["emoji"] = STATE_EMOJI.get(current_state, '🌱')
                 plant_data["current_state"] = current_state
                 plant_data["water_status"] = format_days_ago(plant.get('last_watered'))
-                # Прокидываем поля Этапа 3
                 plant_data["last_watered"] = plant.get('last_watered')
                 plant_data["watering_interval"] = plant.get('watering_interval', 7)
                 plant_data["next_watering_date"] = plant.get('next_watering_date')
@@ -237,13 +337,11 @@ async def water_plant(user_id: int, plant_id: int) -> dict:
         if not plant:
             return {"success": False, "error": "Растение не найдено"}
 
-        # Используем новый метод с серией
         result = await db.water_plant_with_streak(user_id, plant_id)
 
         if not result["success"]:
             return result
 
-        # Пересоздаём напоминание
         await create_plant_reminder(plant_id, user_id, result["interval"])
 
         current_time = get_moscow_now().strftime("%d.%m.%Y в %H:%M")
@@ -331,7 +429,7 @@ async def get_plant_details(plant_id: int, user_id: int) -> dict:
             "state_emoji": state_emoji,
             "state_name": state_name,
             "watering_interval": plant.get('watering_interval', 7),
-            "state_changes_count": 0,  # legacy для совместимости с ботом
+            "state_changes_count": 0,
             "water_status": format_days_ago(plant.get('last_watered')),
         }
 
