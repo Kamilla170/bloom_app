@@ -23,6 +23,7 @@ from services.plant_service import (
     water_plant, delete_plant, rename_plant,
     get_plant_details, fertilize_plant_action,
     update_plant_state_from_photo,
+    _post_chat_auto_message,
 )
 from services.subscription_service import check_limit, increment_usage
 from api.services.cloudinary_service import upload_plant_photo, get_photo_url
@@ -186,6 +187,10 @@ async def analyze_photo(
         raise HTTPException(status_code=400, detail="Файл слишком большой (макс. 20 МБ)")
 
     result = await analyze_plant_image(image_bytes)
+
+    # На фото не растение — лимит не списываем, фото в Cloudinary не грузим
+    if not result.get("success") and result.get("error_code") == "not_a_plant":
+        raise HTTPException(status_code=400, detail=result["error"])
 
     if not result["success"]:
         return AnalysisResponse(success=False, error=result.get("error", "Ошибка анализа"))
@@ -388,10 +393,14 @@ async def _process_photo_update(
     user_id: int,
     image_bytes: bytes,
     message_type: str,
-) -> tuple[dict, str, dict]:
+) -> tuple[dict, str | None, dict | None]:
     """
     Общий код для /photo и /chat-photo: лимит, анализ, апдейт состояния, plant_photos.
     Возвращает: (analyze_result, photo_url, update_result).
+
+    Если на фото не растение — возвращает (analyze_result, None, None).
+    Лимит не списывается, фото в Cloudinary не грузится, карточка растения не трогается.
+    Решение что делать дальше принимает вызывающий эндпоинт.
     """
     allowed, error_msg = await check_limit(user_id, "analyses")
     if not allowed:
@@ -409,6 +418,10 @@ async def _process_photo_update(
 
     previous_state = plant.get("current_state", "healthy")
     result = await analyze_plant_image(image_bytes, previous_state=previous_state)
+
+    # На фото не растение — выходим до любых сайд-эффектов.
+    if not result.get("success") and result.get("error_code") == "not_a_plant":
+        return result, None, None
 
     if not result["success"]:
         raise HTTPException(status_code=500, detail=result.get("error", "Ошибка анализа"))
@@ -461,12 +474,16 @@ async def update_plant_photo(
     Используется кнопкой 'Обновить фото' в карточке.
     """
     image_bytes = await photo.read()
-    await _process_photo_update(
+    analyze_result, _, _ = await _process_photo_update(
         plant_id=plant_id,
         user_id=user_id,
         image_bytes=image_bytes,
         message_type="auto_analysis",
     )
+
+    # На фото не растение — карточку не трогаем, возвращаем понятную 400.
+    if not analyze_result.get("success") and analyze_result.get("error_code") == "not_a_plant":
+        raise HTTPException(status_code=400, detail=analyze_result["error"])
 
     db = await get_db()
     plant = await db.get_plant_with_state(plant_id, user_id)
@@ -491,6 +508,51 @@ async def send_chat_photo(
         image_bytes=image_bytes,
         message_type="user_photo",
     )
+
+    # На фото не растение — пишем в чат сообщение от ИИ с отказом
+    # и возвращаем его. Карточку растения не трогаем, лимит не списан.
+    if not analyze_result.get("success") and analyze_result.get("error_code") == "not_a_plant":
+        refusal_text = analyze_result["error"]
+
+        try:
+            await _post_chat_auto_message(
+                plant_id=plant_id,
+                user_id=user_id,
+                photo_url=None,
+                answer_text=refusal_text,
+                message_type="user_photo",
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ Не удалось записать сообщение-отказ в чат: {e}")
+
+        # Достаём только что записанное сообщение
+        db = await get_db()
+        history = await db.get_plant_qa_history(plant_id, limit=1)
+        if history:
+            qa = history[0]
+            created = qa.get("question_date") or qa.get("created_at")
+            return ChatPhotoMessageOut(
+                id=qa.get("id", 0),
+                question="",
+                answer=qa.get("answer_text", refusal_text) or refusal_text,
+                created_at=created.isoformat() if created else datetime.now().isoformat(),
+                plant_id=plant_id,
+                plant_name=None,
+                photo_url=None,
+                message_type="user_photo",
+            )
+
+        # Fallback если запись в БД не удалась
+        return ChatPhotoMessageOut(
+            id=0,
+            question="",
+            answer=refusal_text,
+            created_at=datetime.now().isoformat(),
+            plant_id=plant_id,
+            plant_name=None,
+            photo_url=None,
+            message_type="user_photo",
+        )
 
     # Достаём только что записанное сообщение из plant_qa_history
     db = await get_db()
