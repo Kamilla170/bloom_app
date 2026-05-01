@@ -206,11 +206,11 @@ async def update_plant_state_from_photo(plant_id: int, user_id: int,
         state_reason = state_info.get('state_reason', 'Анализ AI')
         state_changed = (new_state != previous_state)
 
-        # Старое фото в историю
+        # Старое фото в историю (plant_photos)
         old_photo = plant.get('photo_file_id')
         if old_photo and old_photo.startswith('http'):
             try:
-                await db.add_plant_photo_to_history(plant_id, old_photo)
+                await db.add_plant_photo(plant_id, user_id, old_photo)
                 logger.info(f"📸 Старое фото добавлено в историю растения {plant_id}")
             except Exception as e:
                 logger.error(f"Ошибка сохранения фото в историю: {e}")
