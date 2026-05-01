@@ -56,7 +56,7 @@ async def run_app_migrations():
             ON user_achievements(user_id)
         """)
 
-        # Бэкфилл total_waterings (если триггер ещё не заполнил)
+        # Бэкфилл total_waterings
         await conn.execute("""
             UPDATE users u
             SET total_waterings = COALESCE((
@@ -78,7 +78,6 @@ async def run_app_migrations():
                 WHERE total_photos IS NULL OR total_photos = 0
             """)
         except Exception:
-            # plant_photos может не существовать
             pass
 
         logger.info("✅ Миграция: аналитика и достижения (Этап 9)")
@@ -97,6 +96,12 @@ async def run_app_migrations():
         except Exception as e:
             logger.info(f"Миграция общего чата уже выполнена: {e}")
 
+        # --- Scheduler пушей: дата последней рассылки напоминания юзеру ---
+        await conn.execute(
+            "ALTER TABLE user_settings ADD COLUMN IF NOT EXISTS last_reminder_sent DATE"
+        )
+        logger.info("✅ Миграция: user_settings.last_reminder_sent")
+
 
 # === Lifecycle ===
 
@@ -111,9 +116,18 @@ async def lifespan(app: FastAPI):
     from services.fcm_service import init_firebase
     init_firebase()
 
+    # Запуск планировщика (напоминания о поливе + автоплатежи)
+    from services.scheduler import start_scheduler
+    start_scheduler()
+
     logger.info("✅ API готов к работе")
     yield
+
     logger.info("🛑 API: завершение")
+
+    from services.scheduler import stop_scheduler
+    stop_scheduler()
+
     try:
         db = await get_db()
         await db.close()
