@@ -268,7 +268,7 @@ async def analyze_with_openai_advanced(image_data: bytes, user_question: str = N
         return {"success": False, "error": "❌ OpenAI API недоступен"}
 
     try:
-        optimized_image = optimize_image_for_analysis(image_data)
+        optimized_image = await optimize_image_for_analysis(image_data)
         base64_image = base64.b64encode(optimized_image).decode('utf-8')
 
         season_data = get_current_season()
