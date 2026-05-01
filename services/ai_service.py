@@ -261,6 +261,25 @@ def format_recommendations_text(raw_analysis: str) -> str:
     return "\n\n".join(parts)
 
 
+def _extract_not_a_plant_subject(raw_analysis: str) -> str | None:
+    """
+    Если ответ модели начинается с НЕ_РАСТЕНИЕ: — вернуть описание того,
+    что на фото (например, "кот"). Иначе None.
+    Проверяем только начало ответа: модель должна вернуть РОВНО эту строку.
+    """
+    if not raw_analysis:
+        return None
+    text = raw_analysis.strip()
+    # Маркер должен быть в первой строке (модель проинструктирована
+    # вернуть РОВНО эту строку и больше ничего).
+    first_line = text.split('\n', 1)[0].strip()
+    if first_line.upper().startswith("НЕ_РАСТЕНИЕ:"):
+        subject = first_line.split(':', 1)[1].strip()
+        subject = subject.strip(' "\'.,!?()[]')
+        return subject or "не растение"
+    return None
+
+
 async def analyze_with_openai_advanced(image_data: bytes, user_question: str = None,
                                         previous_state: str = None) -> dict:
     """Анализ через OpenAI с единым промптом."""
@@ -304,7 +323,8 @@ async def analyze_with_openai_advanced(image_data: bytes, user_question: str = N
                 f"Сравни текущее фото с этим состоянием и отметь изменения в поле ПРИЧИНА_СОСТОЯНИЯ. "
                 f"ВАЖНО: это лишь дополнительный контекст. Всё равно заполни ВЕСЬ шаблон ответа полностью "
                 f"(НАЗВАНИЕ_РУС, НАЗВАНИЕ_ЛАТ, ТЕКУЩЕЕ_СОСТОЯНИЕ, УВЕРЕННОСТЬ, ПОЛИВ_ИНТЕРВАЛ и все остальные поля), "
-                f"как если бы анализировал растение впервые."
+                f"как если бы анализировал растение впервые. "
+                f"Но если на фото НЕ растение — всё равно действует правило вернуть только строку 'НЕ_РАСТЕНИЕ: ...'."
             )
         if user_question:
             prompt += (
@@ -329,6 +349,20 @@ async def analyze_with_openai_advanced(image_data: bytes, user_question: str = N
         )
 
         raw_analysis = response.choices[0].message.content
+
+        # Сначала проверяем явный отказ "это не растение"
+        not_a_plant_subject = _extract_not_a_plant_subject(raw_analysis)
+        if not_a_plant_subject is not None:
+            logger.info(f"🚫 На фото не растение: {not_a_plant_subject!r}")
+            return {
+                "success": False,
+                "error_code": "not_a_plant",
+                "subject": not_a_plant_subject,
+                "error": (
+                    f"На фото не растение, а {not_a_plant_subject}. "
+                    f"Загрузите, пожалуйста, фото вашего растения."
+                ),
+            }
 
         if not raw_analysis or len(raw_analysis) < 100:
             logger.warning(
@@ -392,6 +426,10 @@ async def analyze_plant_image(image_data: bytes, user_question: str = None,
     logger.info("🔍 Запуск анализа растения")
 
     result = await analyze_with_openai_advanced(image_data, user_question, previous_state)
+
+    # Прокидываем "не растение" как есть, чтобы роутер мог корректно обработать
+    if not result.get("success") and result.get("error_code") == "not_a_plant":
+        return result
 
     if result["success"]:
         if 'watering_interval' not in result:
