@@ -299,9 +299,18 @@ async def analyze_with_openai_advanced(image_data: bytes, user_question: str = N
         )
 
         if previous_state:
-            prompt += f"\n\nПредыдущее состояние растения: {previous_state}."
+            prompt += (
+                f"\n\nКОНТЕКСТ ДЛЯ СРАВНЕНИЯ: при предыдущем анализе состояние растения было «{previous_state}». "
+                f"Сравни текущее фото с этим состоянием и отметь изменения в поле ПРИЧИНА_СОСТОЯНИЯ. "
+                f"ВАЖНО: это лишь дополнительный контекст. Всё равно заполни ВЕСЬ шаблон ответа полностью "
+                f"(НАЗВАНИЕ_РУС, НАЗВАНИЕ_ЛАТ, ТЕКУЩЕЕ_СОСТОЯНИЕ, УВЕРЕННОСТЬ, ПОЛИВ_ИНТЕРВАЛ и все остальные поля), "
+                f"как если бы анализировал растение впервые."
+            )
         if user_question:
-            prompt += f"\n\nВопрос пользователя: {user_question}"
+            prompt += (
+                f"\n\nДополнительный вопрос пользователя: {user_question}. "
+                f"Ответь на него в поле СОВЕТ, но ВЕСЬ остальной шаблон всё равно заполни полностью."
+            )
 
         response = await openai_client.chat.completions.create(
             model="gpt-4o",
@@ -321,7 +330,11 @@ async def analyze_with_openai_advanced(image_data: bytes, user_question: str = N
 
         raw_analysis = response.choices[0].message.content
 
-        if len(raw_analysis) < 100:
+        if not raw_analysis or len(raw_analysis) < 100:
+            logger.warning(
+                f"⚠️ Короткий/пустой ответ OpenAI (len={len(raw_analysis or '')}, "
+                f"previous_state={previous_state!r}): {(raw_analysis or '')[:500]!r}"
+            )
             raise Exception("Некачественный ответ")
 
         confidence = 0
