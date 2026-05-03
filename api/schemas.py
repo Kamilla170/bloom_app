@@ -40,6 +40,7 @@ class UserProfile(BaseModel):
     plants_count: int = 0
     total_waterings: int = 0
     questions_asked: int = 0
+    avatar_preset_id: Optional[str] = None
 
 
 class UserSettings(BaseModel):
@@ -52,6 +53,10 @@ class UpdateSettingsRequest(BaseModel):
     reminder_enabled: Optional[bool] = None
     reminder_time: Optional[str] = None
     monthly_photo_reminder: Optional[bool] = None
+
+
+class UpdateProfileRequest(BaseModel):
+    avatar_preset_id: Optional[str] = Field(None, min_length=1, max_length=32)
 
 
 # === PLANTS ===
@@ -243,7 +248,7 @@ class ErrorResponse(BaseModel):
     detail: str
 
 
-# === ANALYTICS (Этап 9) ===
+# === ANALYTICS ===
 
 class WateringStreakInfo(BaseModel):
     current: int
