@@ -25,7 +25,7 @@ router = APIRouter(prefix="/me", tags=["user"])
 # Должен совпадать со списком kAvatarPresets во Flutter (lib/config/avatar_presets.dart)
 AVATAR_PRESETS = [
     "sunny", "cowboy", "rocker", "surfer", "classic",
-    "nerd", "royal", "dj", "yogi", "astro",
+    "nerd", "royal", "dj", "yogi", "astro", "pirate",
 ]
 
 
