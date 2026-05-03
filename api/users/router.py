@@ -3,6 +3,7 @@
 """
 
 import logging
+import random
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -10,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from database import get_db
 from api.auth.dependencies import get_current_user
 from api.schemas import (
-    UserProfile, UserSettings, UpdateSettingsRequest,
+    UserProfile, UserSettings, UpdateSettingsRequest, UpdateProfileRequest,
     PlanInfo, UsageStats, SuccessResponse, RegisterDeviceRequest,
 )
 from api.services.cloudinary_service import get_photo_url
@@ -19,6 +20,25 @@ from services.subscription_service import get_user_plan, get_usage_stats
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/me", tags=["user"])
+
+# Список доступных аватарок-пресетов.
+# Должен совпадать со списком kAvatarPresets во Flutter (lib/config/avatar_presets.dart)
+AVATAR_PRESETS = [
+    "sunny", "cowboy", "rocker", "surfer", "classic",
+    "nerd", "royal", "dj", "yogi", "astro",
+]
+
+
+async def _ensure_avatar_preset(conn, user_id: int, current: str | None) -> str:
+    """Если у пользователя ещё нет preset-а, назначаем случайный и сохраняем."""
+    if current and current in AVATAR_PRESETS:
+        return current
+    new_preset = random.choice(AVATAR_PRESETS)
+    await conn.execute(
+        "UPDATE users SET avatar_preset_id = $1 WHERE user_id = $2",
+        new_preset, user_id,
+    )
+    return new_preset
 
 
 @router.get("", response_model=UserProfile)
@@ -29,7 +49,53 @@ async def get_profile(user_id: int = Depends(get_current_user)):
     async with db.pool.acquire() as conn:
         row = await conn.fetchrow("""
             SELECT user_id, email, first_name, created_at,
-                   plants_count, total_waterings, questions_asked
+                   plants_count, total_waterings, questions_asked,
+                   avatar_preset_id
+            FROM users WHERE user_id = $1
+        """, user_id)
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+        # Lazy-миграция: если preset не назначен, выбираем случайный.
+        avatar_preset = await _ensure_avatar_preset(
+            conn, user_id, row.get("avatar_preset_id")
+        )
+
+    return UserProfile(
+        user_id=row["user_id"],
+        email=row.get("email"),
+        first_name=row.get("first_name"),
+        created_at=row.get("created_at"),
+        plants_count=row.get("plants_count", 0),
+        total_waterings=row.get("total_waterings", 0),
+        questions_asked=row.get("questions_asked", 0),
+        avatar_preset_id=avatar_preset,
+    )
+
+
+@router.patch("", response_model=UserProfile)
+async def update_profile(
+    req: UpdateProfileRequest,
+    user_id: int = Depends(get_current_user),
+):
+    """Обновление профиля. Сейчас поддерживается смена аватара."""
+    if req.avatar_preset_id is not None:
+        if req.avatar_preset_id not in AVATAR_PRESETS:
+            raise HTTPException(status_code=400, detail="Неизвестный аватар")
+
+    db = await get_db()
+    async with db.pool.acquire() as conn:
+        if req.avatar_preset_id is not None:
+            await conn.execute(
+                "UPDATE users SET avatar_preset_id = $1 WHERE user_id = $2",
+                req.avatar_preset_id, user_id,
+            )
+
+        row = await conn.fetchrow("""
+            SELECT user_id, email, first_name, created_at,
+                   plants_count, total_waterings, questions_asked,
+                   avatar_preset_id
             FROM users WHERE user_id = $1
         """, user_id)
 
@@ -44,6 +110,7 @@ async def get_profile(user_id: int = Depends(get_current_user)):
         plants_count=row.get("plants_count", 0),
         total_waterings=row.get("total_waterings", 0),
         questions_asked=row.get("questions_asked", 0),
+        avatar_preset_id=row.get("avatar_preset_id"),
     )
 
 
