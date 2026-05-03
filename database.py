@@ -46,8 +46,14 @@ class PlantDatabase:
                     tip_analysis_shown BOOLEAN DEFAULT FALSE,
                     tip_save_shown BOOLEAN DEFAULT FALSE,
                     tip_watering_shown BOOLEAN DEFAULT FALSE,
-                    utm_source TEXT
+                    utm_source TEXT,
+                    avatar_preset_id VARCHAR(32)
                 )
+            """)
+
+            # Миграция: avatar_preset_id для существующих БД
+            await conn.execute("""
+                ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_preset_id VARCHAR(32)
             """)
             
             # Таблица настроек пользователей
