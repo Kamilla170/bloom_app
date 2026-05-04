@@ -186,7 +186,7 @@ async def analyze_photo(
     if len(image_bytes) > 20 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Файл слишком большой (макс. 20 МБ)")
 
-    result = await analyze_plant_image(image_bytes)
+    result = await analyze_plant_image(image_bytes, user_id=user_id)
 
     # На фото не растение — лимит не списываем, фото в Cloudinary не грузим
     if not result.get("success") and result.get("error_code") == "not_a_plant":
@@ -417,7 +417,12 @@ async def _process_photo_update(
         raise HTTPException(status_code=400, detail="Файл слишком большой")
 
     previous_state = plant.get("current_state", "healthy")
-    result = await analyze_plant_image(image_bytes, previous_state=previous_state)
+    result = await analyze_plant_image(
+        image_bytes,
+        previous_state=previous_state,
+        user_id=user_id,
+        plant_id=plant_id,
+    )
 
     # На фото не растение — выходим до любых сайд-эффектов.
     if not result.get("success") and result.get("error_code") == "not_a_plant":
