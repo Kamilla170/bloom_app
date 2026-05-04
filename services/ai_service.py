@@ -1,12 +1,14 @@
 import logging
 import base64
 import re
+import time
 from openai import AsyncOpenAI
 
 from config import OPENAI_API_KEY, PLANT_IDENTIFICATION_PROMPT, LEGACY_STATE_MAPPING
 from utils.image_utils import optimize_image_for_analysis
 from utils.formatters import format_plant_analysis
 from utils.season_utils import get_current_season
+from services.analytics_recorder import record_ai_request
 
 logger = logging.getLogger(__name__)
 
@@ -235,7 +237,7 @@ def format_recommendations_text(raw_analysis: str) -> str:
     if not raw_analysis:
         return ""
 
-    # Порядок важен — он сохраняется в выводе
+    # Порядок важен: он сохраняется в выводе
     fields = [
         ("СОСТОЯНИЕ", "Состояние"),
         ("ПОЛИВ_РЕКОМЕНДАЦИИ", "Полив"),
@@ -263,7 +265,7 @@ def format_recommendations_text(raw_analysis: str) -> str:
 
 def _extract_not_a_plant_subject(raw_analysis: str) -> str | None:
     """
-    Если ответ модели начинается с НЕ_РАСТЕНИЕ: — вернуть описание того,
+    Если ответ модели начинается с НЕ_РАСТЕНИЕ: - вернуть описание того,
     что на фото (например, "кот"). Иначе None.
     Проверяем только начало ответа: модель должна вернуть РОВНО эту строку.
     """
@@ -281,7 +283,9 @@ def _extract_not_a_plant_subject(raw_analysis: str) -> str | None:
 
 
 async def analyze_with_openai_advanced(image_data: bytes, user_question: str = None,
-                                        previous_state: str = None) -> dict:
+                                        previous_state: str = None,
+                                        user_id: int = None,
+                                        plant_id: int = None) -> dict:
     """Анализ через OpenAI с единым промптом."""
     if not openai_client:
         return {"success": False, "error": "❌ OpenAI API недоступен"}
@@ -324,7 +328,7 @@ async def analyze_with_openai_advanced(image_data: bytes, user_question: str = N
                 f"ВАЖНО: это лишь дополнительный контекст. Всё равно заполни ВЕСЬ шаблон ответа полностью "
                 f"(НАЗВАНИЕ_РУС, НАЗВАНИЕ_ЛАТ, ТЕКУЩЕЕ_СОСТОЯНИЕ, УВЕРЕННОСТЬ, ПОЛИВ_ИНТЕРВАЛ и все остальные поля), "
                 f"как если бы анализировал растение впервые. "
-                f"Но если на фото НЕ растение — всё равно действует правило вернуть только строку 'НЕ_РАСТЕНИЕ: ...'."
+                f"Но если на фото НЕ растение - всё равно действует правило вернуть только строку 'НЕ_РАСТЕНИЕ: ...'."
             )
         if user_question:
             prompt += (
@@ -332,8 +336,11 @@ async def analyze_with_openai_advanced(image_data: bytes, user_question: str = N
                 f"Ответь на него в поле СОВЕТ, но ВЕСЬ остальной шаблон всё равно заполни полностью."
             )
 
+        model_name = "gpt-4o"
+        t_start = time.monotonic()
+
         response = await openai_client.chat.completions.create(
-            model="gpt-4o",
+            model=model_name,
             messages=[
                 {"role": "system", "content": "Вы - профессиональный ботаник-диагност с 30-летним опытом. Используйте только 5 статусов: healthy, flowering, growing, needs_care, dormancy."},
                 {"role": "user", "content": [
@@ -346,6 +353,24 @@ async def analyze_with_openai_advanced(image_data: bytes, user_question: str = N
             ],
             max_tokens=1500,
             temperature=0.2
+        )
+
+        latency_ms = int((time.monotonic() - t_start) * 1000)
+
+        # Аналитика: записываем независимо от того, успешный ли ответ.
+        # Стоимость токенов нам нужна даже если модель вернула "не растение".
+        await record_ai_request(
+            user_id=user_id,
+            request_type='photo_analysis',
+            model=model_name,
+            response=response,
+            latency_ms=latency_ms,
+            plant_id=plant_id,
+            metadata={
+                'has_previous_state': bool(previous_state),
+                'has_user_question': bool(user_question),
+                'season': season_data.get('season'),
+            },
         )
 
         raw_analysis = response.choices[0].message.content
@@ -417,7 +442,9 @@ async def analyze_with_openai_advanced(image_data: bytes, user_question: str = N
 
 async def analyze_plant_image(image_data: bytes, user_question: str = None,
                               previous_state: str = None, retry_count: int = 0,
-                              plant_context: str = None) -> dict:
+                              plant_context: str = None,
+                              user_id: int = None,
+                              plant_id: int = None) -> dict:
     """
     Главная функция анализа.
     Этап 3: используем единый промпт через analyze_with_openai_advanced,
@@ -425,7 +452,10 @@ async def analyze_plant_image(image_data: bytes, user_question: str = None,
     """
     logger.info("🔍 Запуск анализа растения")
 
-    result = await analyze_with_openai_advanced(image_data, user_question, previous_state)
+    result = await analyze_with_openai_advanced(
+        image_data, user_question, previous_state,
+        user_id=user_id, plant_id=plant_id,
+    )
 
     # Прокидываем "не растение" как есть, чтобы роутер мог корректно обработать
     if not result.get("success") and result.get("error_code") == "not_a_plant":
@@ -446,7 +476,8 @@ async def analyze_plant_image(image_data: bytes, user_question: str = None,
     return {"success": False, "error": result.get("error", "Анализ не удался")}
 
 
-async def answer_plant_question(question: str, plant_context: str = None) -> dict:
+async def answer_plant_question(question: str, plant_context: str = None,
+                                user_id: int = None, plant_id: int = None) -> dict:
     """Ответить на вопрос о растении с контекстом"""
     if not openai_client:
         return {"error": "❌ OpenAI API недоступен"}
@@ -510,11 +541,32 @@ async def answer_plant_question(question: str, plant_context: str = None) -> dic
                     api_params["max_tokens"] = 1000
                     api_params["temperature"] = 0.4
 
+                t_start = time.monotonic()
                 response = await openai_client.chat.completions.create(**api_params)
+                latency_ms = int((time.monotonic() - t_start) * 1000)
+
                 answer = response.choices[0].message.content
 
                 if answer and len(answer) > 10:
                     logger.info(f"✅ Ответ от {model_name}")
+
+                    # Аналитика только при успехе. На retry между моделями
+                    # запись не пишем (мы уже логируем warning в блоке except ниже).
+                    await record_ai_request(
+                        user_id=user_id,
+                        request_type='qa',
+                        model=model_name,
+                        response=response,
+                        latency_ms=latency_ms,
+                        plant_id=plant_id,
+                        metadata={
+                            'has_plant_context': bool(plant_context),
+                            'context_length': len(plant_context) if plant_context else 0,
+                            'season': season_info.get('season'),
+                            'is_offtopic_refusal': OFFTOPIC_REFUSAL_PHRASE.lower() in (answer or '').lower(),
+                        },
+                    )
+
                     return {"answer": answer, "model": model_name}
 
             except Exception as model_error:
@@ -537,7 +589,7 @@ def is_offtopic_refusal(answer_text: str) -> bool:
     return OFFTOPIC_REFUSAL_PHRASE.lower() in answer_text.lower()
 
 
-async def generate_growing_plan(plant_name: str) -> tuple:
+async def generate_growing_plan(plant_name: str, user_id: int = None) -> tuple:
     """Генерация плана выращивания (без изменений Этапа 3)"""
     if not openai_client:
         return None, None
@@ -557,14 +609,31 @@ async def generate_growing_plan(plant_name: str) -> tuple:
 🌳 ЭТАП 4: Название (X дней)
 """
 
+        model_name = "gpt-4o"
+        t_start = time.monotonic()
+
         response = await openai_client.chat.completions.create(
-            model="gpt-4o",
+            model=model_name,
             messages=[
                 {"role": "system", "content": f"Вы - агроном. Сейчас {season_info['season_ru']}."},
                 {"role": "user", "content": prompt}
             ],
             max_tokens=1200,
             temperature=0.2
+        )
+
+        latency_ms = int((time.monotonic() - t_start) * 1000)
+
+        await record_ai_request(
+            user_id=user_id,
+            request_type='growing_plan',
+            model=model_name,
+            response=response,
+            latency_ms=latency_ms,
+            metadata={
+                'plant_name': plant_name,
+                'season': season_info.get('season'),
+            },
         )
 
         plan_text = response.choices[0].message.content
