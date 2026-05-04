@@ -30,7 +30,14 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Bloom AI Analytics", lifespan=lifespan)
-app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Монтируем static только если папка существует.
+# Сейчас static не используется (Tailwind/Chart.js через CDN, стили инлайн),
+# но оставлено на будущее.
+import os as _os
+if _os.path.isdir("static"):
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+
 templates = Jinja2Templates(directory="templates")
 
 
