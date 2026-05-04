@@ -162,7 +162,10 @@ async def ask_question(
         plant_name = plant.get("display_name")
         context_text = await get_plant_context(req.plant_id, user_id, focus="general")
 
-    answer = await answer_plant_question(req.question, context_text)
+    answer = await answer_plant_question(
+        req.question, context_text,
+        user_id=user_id, plant_id=req.plant_id,
+    )
 
     if isinstance(answer, dict):
         if "error" in answer:
