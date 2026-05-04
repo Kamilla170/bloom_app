@@ -4,6 +4,7 @@ from typing import Dict, Optional, Tuple
 
 from database import get_db
 from config import FREE_LIMITS, PRO_DURATION_DAYS, PRO_GRACE_PERIOD_DAYS, PRO_PRICE, ADMIN_USER_IDS
+from services.analytics_recorder import record_subscription_event
 
 logger = logging.getLogger(__name__)
 
@@ -73,8 +74,12 @@ async def get_user_plan(user_id: int) -> Dict:
                 'plan_id': row['plan_id'],
             }
 
-    # Подписка истекла — переводим на free
-    await downgrade_to_free(user_id)
+    # Подписка истекла: переводим на free.
+    # ВАЖНО: это lazy-expiration. В аналитике factual expiration считается
+    # по subscriptions.expires_at + grace_period (в SQL-views). Не пишем
+    # subscription_event здесь - время будет искажено (момент входа,
+    # а не момент реального истечения).
+    await downgrade_to_free(user_id, _from_lazy_expiration=True)
     return {
         'plan': 'free',
         'expires_at': None,
@@ -86,7 +91,7 @@ async def get_user_plan(user_id: int) -> Dict:
 
 
 async def is_pro(user_id: int) -> bool:
-    """Быстрая проверка — PRO ли пользователь"""
+    """Быстрая проверка - PRO ли пользователь"""
     if user_id in ADMIN_USER_IDS:
         return True
     plan = await get_user_plan(user_id)
@@ -229,9 +234,62 @@ async def get_usage_stats(user_id: int) -> Dict:
     }
 
 
+def _classify_subscription_event(
+    existing_plan: Optional[str],
+    existing_plan_id: Optional[str],
+    existing_plan_days: Optional[int],
+    existing_expires_at: Optional[datetime],
+    new_plan_id: Optional[str],
+    new_plan_days: int,
+    granted_by: Optional[int],
+    now: datetime,
+) -> str:
+    """
+    Определить тип события для subscription_events.
+
+    Логика:
+        - granted_by != None: granted_by_admin
+        - existing нет / plan='free' / истёк (с учётом grace): created
+        - тот же plan_id: renewed
+        - другой plan_id, plan_days больше: upgraded
+        - другой plan_id, plan_days меньше: downgraded
+        - plan_id отсутствует с одной из сторон: best-effort renewed
+    """
+    if granted_by is not None:
+        return 'granted_by_admin'
+
+    grace_end = None
+    if existing_expires_at:
+        grace_end = existing_expires_at + timedelta(days=PRO_GRACE_PERIOD_DAYS)
+
+    is_active_pro = (
+        existing_plan == 'pro'
+        and existing_expires_at is not None
+        and grace_end is not None
+        and grace_end > now
+    )
+
+    if not is_active_pro:
+        return 'created'
+
+    # Идёт активная подписка PRO. Определяем upgrade/downgrade/renew.
+    if existing_plan_id and new_plan_id and existing_plan_id == new_plan_id:
+        return 'renewed'
+
+    if existing_plan_days and new_plan_days:
+        if new_plan_days > existing_plan_days:
+            return 'upgraded'
+        if new_plan_days < existing_plan_days:
+            return 'downgraded'
+
+    return 'renewed'
+
+
 async def activate_pro(user_id: int, days: int = PRO_DURATION_DAYS, amount: int = None,
                        payment_method_id: str = None, granted_by: int = None,
-                       plan_id: str = None):
+                       plan_id: str = None,
+                       payment_id: str = None,
+                       source: str = None):
     """Активировать PRO подписку"""
     db = await get_db()
     now = datetime.now()
@@ -242,9 +300,10 @@ async def activate_pro(user_id: int, days: int = PRO_DURATION_DAYS, amount: int 
     await ensure_plan_columns()
 
     async with db.pool.acquire() as conn:
-        existing = await conn.fetchrow(
-            "SELECT expires_at, plan FROM subscriptions WHERE user_id = $1", user_id
-        )
+        existing = await conn.fetchrow("""
+            SELECT expires_at, plan, plan_id, plan_days
+            FROM subscriptions WHERE user_id = $1
+        """, user_id)
 
         if existing and existing['plan'] == 'pro' and existing['expires_at'] and existing['expires_at'] > now:
             expires_at = existing['expires_at'] + timedelta(days=days)
@@ -268,12 +327,48 @@ async def activate_pro(user_id: int, days: int = PRO_DURATION_DAYS, amount: int 
         """, user_id, expires_at, payment_method_id, granted_by, amount, days, plan_id)
 
     logger.info(f"✅ PRO активирован: user_id={user_id}, plan_id={plan_id}, {amount}₽/{days}д, expires={expires_at}")
+
+    # Аналитика: классифицируем событие и пишем в subscription_events.
+    event_type = _classify_subscription_event(
+        existing_plan=existing['plan'] if existing else None,
+        existing_plan_id=existing['plan_id'] if existing else None,
+        existing_plan_days=existing['plan_days'] if existing else None,
+        existing_expires_at=existing['expires_at'] if existing else None,
+        new_plan_id=plan_id,
+        new_plan_days=days,
+        granted_by=granted_by,
+        now=now,
+    )
+
+    await record_subscription_event(
+        user_id=user_id,
+        event_type=event_type,
+        old_plan_id=existing['plan_id'] if existing else None,
+        new_plan_id=plan_id,
+        old_expires_at=existing['expires_at'] if existing else None,
+        new_expires_at=expires_at,
+        amount_rub=amount if granted_by is None else 0,
+        payment_id=payment_id,
+        source=source or ('admin' if granted_by else 'unknown'),
+        metadata={
+            'days': days,
+            'has_payment_method': payment_method_id is not None,
+            'granted_by': granted_by,
+        },
+    )
+
     return expires_at
 
 
-async def downgrade_to_free(user_id: int):
+async def downgrade_to_free(user_id: int, _from_lazy_expiration: bool = False):
     db = await get_db()
+
+    # Получаем старое состояние для аналитики
     async with db.pool.acquire() as conn:
+        old = await conn.fetchrow("""
+            SELECT plan_id, expires_at FROM subscriptions WHERE user_id = $1
+        """, user_id)
+
         await conn.execute("""
             UPDATE subscriptions
             SET plan = 'free', auto_pay_method_id = NULL, updated_at = CURRENT_TIMESTAMP
@@ -282,9 +377,48 @@ async def downgrade_to_free(user_id: int):
 
     logger.info(f"⬇️ Пользователь {user_id} переведён на FREE план")
 
+    # Аналитика: lazy-expiration НЕ пишется в события (искажение времени).
+    # Реальное истечение считается из subscriptions.expires_at в SQL-views.
+    if _from_lazy_expiration:
+        return
+
+    # Если попали сюда не по lazy-expiration: значит revoke вручную
+    # (revoke_pro). Логируем как cancelled.
+    await record_subscription_event(
+        user_id=user_id,
+        event_type='cancelled',
+        old_plan_id=old['plan_id'] if old else None,
+        new_plan_id=None,
+        old_expires_at=old['expires_at'] if old else None,
+        source='manual_downgrade',
+    )
+
 
 async def revoke_pro(user_id: int):
-    await downgrade_to_free(user_id)
+    db = await get_db()
+
+    # Получаем старое состояние для аналитики
+    async with db.pool.acquire() as conn:
+        old = await conn.fetchrow("""
+            SELECT plan_id, expires_at FROM subscriptions WHERE user_id = $1
+        """, user_id)
+
+        await conn.execute("""
+            UPDATE subscriptions
+            SET plan = 'free', auto_pay_method_id = NULL, updated_at = CURRENT_TIMESTAMP
+            WHERE user_id = $1
+        """, user_id)
+
+    logger.info(f"⬇️ revoke_pro: user_id={user_id}")
+
+    await record_subscription_event(
+        user_id=user_id,
+        event_type='revoked_by_admin',
+        old_plan_id=old['plan_id'] if old else None,
+        new_plan_id=None,
+        old_expires_at=old['expires_at'] if old else None,
+        source='admin',
+    )
 
 
 async def reset_all_usage_limits():
