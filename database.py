@@ -784,7 +784,71 @@ class PlantDatabase:
             """)
             
             logger.info("✅ Существующие данные обновлены")
+# === ЭТАП 0 АНАЛИТИКИ: AI-запросы ===
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS ai_requests (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    request_type TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    input_tokens INTEGER NOT NULL DEFAULT 0,
+                    output_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_tokens INTEGER NOT NULL DEFAULT 0,
+                    cost_usd NUMERIC(10, 6) NOT NULL DEFAULT 0,
+                    latency_ms INTEGER,
+                    plant_id INTEGER,
+                    metadata JSONB,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE,
+                    FOREIGN KEY (plant_id) REFERENCES plants (id) ON DELETE SET NULL
+                )
+            """)
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_requests_user_date ON ai_requests(user_id, created_at DESC)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_requests_type_date ON ai_requests(request_type, created_at DESC)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_requests_created ON ai_requests(created_at DESC)")
 
+            # === ЭТАП 0 АНАЛИТИКИ: События подписок ===
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS subscription_events (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    old_plan_id VARCHAR(20),
+                    new_plan_id VARCHAR(20),
+                    old_expires_at TIMESTAMP,
+                    new_expires_at TIMESTAMP,
+                    amount_rub INTEGER,
+                    payment_id TEXT,
+                    source TEXT,
+                    metadata JSONB,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE
+                )
+            """)
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_sub_events_user_date ON subscription_events(user_id, created_at DESC)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_sub_events_type_date ON subscription_events(event_type, created_at DESC)")
+
+            # === ЭТАП 0 АНАЛИТИКИ: Лог webhooks YooKassa ===
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS yookassa_webhooks_log (
+                    id SERIAL PRIMARY KEY,
+                    event_type TEXT,
+                    payment_id TEXT,
+                    payload JSONB NOT NULL,
+                    processed BOOLEAN DEFAULT FALSE,
+                    processed_at TIMESTAMP,
+                    error TEXT,
+                    received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_webhooks_received ON yookassa_webhooks_log(received_at DESC)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_webhooks_payment ON yookassa_webhooks_log(payment_id) WHERE payment_id IS NOT NULL")
+
+            # === ЭТАП 0 АНАЛИТИКИ: plan_id в payments ===
+            await conn.execute("ALTER TABLE payments ADD COLUMN IF NOT EXISTS plan_id VARCHAR(20)")
+            await conn.execute("CREATE INDEX IF NOT EXISTS idx_payments_plan_id ON payments(plan_id) WHERE plan_id IS NOT NULL")
+
+            logger.info("✅ Этап 0 аналитики: таблицы и колонки созданы")
             # === МИГРАЦИЯ: Создание подписок для существующих пользователей ===
             logger.info("💳 Миграция подписок для существующих пользователей...")
             await conn.execute("""
