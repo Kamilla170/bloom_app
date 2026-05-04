@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bloom AI Analytics</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        .kpi-value { font-feature-settings: 'tnum' on, 'lnum' on; }
+        .chart-container { position: relative; height: 320px; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+        <!-- Header -->
+        <div class="flex items-center justify-between mb-8">
+            <div>
+                <h1 class="text-3xl font-bold text-slate-900">🌱 Bloom AI Analytics</h1>
+                <p class="text-sm text-slate-500 mt-1">Last updated: {{ now }} (cache TTL 60s)</p>
+            </div>
+            <button onclick="location.reload()"
+                    class="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition text-sm font-medium">
+                Обновить
+            </button>
+        </div>
+
+        <!-- KPI Cards -->
+        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
+            <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
+                <div class="text-xs text-slate-500 uppercase tracking-wider">MRR</div>
+                <div class="text-2xl font-bold mt-2 kpi-value">{{ fmt_rub(kpi.mrr_rub) }}</div>
+                <div class="text-xs text-slate-400 mt-1">ARR: {{ fmt_rub(kpi.arr_rub) }}</div>
+            </div>
+            <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
+                <div class="text-xs text-slate-500 uppercase tracking-wider">Активных подписок</div>
+                <div class="text-2xl font-bold mt-2 kpi-value">{{ fmt_int(kpi.active_subscriptions) }}</div>
+                <div class="text-xs text-slate-400 mt-1">ARPU: {{ fmt_rub(kpi.arpu_rub) }}</div>
+            </div>
+            <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
+                <div class="text-xs text-slate-500 uppercase tracking-wider">Всего юзеров</div>
+                <div class="text-2xl font-bold mt-2 kpi-value">{{ fmt_int(kpi.total_users) }}</div>
+                <div class="text-xs text-slate-400 mt-1">Платящих сейчас: {{ fmt_int(overall.currently_paying) }}</div>
+            </div>
+            <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
+                <div class="text-xs text-slate-500 uppercase tracking-wider">MAU</div>
+                <div class="text-2xl font-bold mt-2 kpi-value">{{ fmt_int(kpi.mau) }}</div>
+                <div class="text-xs text-slate-400 mt-1">за 30 дней</div>
+            </div>
+            <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
+                <div class="text-xs text-slate-500 uppercase tracking-wider">AI cost (этот мес)</div>
+                <div class="text-2xl font-bold mt-2 kpi-value">{{ fmt_rub(kpi.ai_cost_rub_month) }}</div>
+                <div class="text-xs text-slate-400 mt-1">{{ fmt_int(kpi.ai_requests_month) }} запросов</div>
+            </div>
+            <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
+                <div class="text-xs text-slate-500 uppercase tracking-wider">Gross margin (lifetime)</div>
+                <div class="text-2xl font-bold mt-2 kpi-value
+                    {% if overall.total_gross_margin_rub|float < 0 %}text-rose-600{% else %}text-emerald-600{% endif %}">
+                    {{ fmt_rub(overall.total_gross_margin_rub) }}
+                </div>
+                <div class="text-xs text-slate-400 mt-1">Revenue минус AI</div>
+            </div>
+        </div>
+
+        <!-- Revenue + AI Cost Charts -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+                <h2 class="text-lg font-semibold mb-4">Выручка по месяцам</h2>
+                <div class="chart-container"><canvas id="revenueChart"></canvas></div>
+            </div>
+            <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+                <h2 class="text-lg font-semibold mb-4">AI cost vs Revenue (₽)</h2>
+                <div class="chart-container"><canvas id="costRevenueChart"></canvas></div>
+            </div>
+        </div>
+
+        <!-- Subscriptions by plan + AI breakdown -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+                <h2 class="text-lg font-semibold mb-4">Подписки по тарифам</h2>
+                {% if subs_by_plan %}
+                <table class="w-full text-sm">
+                    <thead class="text-xs uppercase text-slate-500">
+                        <tr class="border-b">
+                            <th class="text-left py-2">Тариф</th>
+                            <th class="text-right">Активных</th>
+                            <th class="text-right">MRR</th>
+                            <th class="text-right">ARPU</th>
+                            <th class="text-right">Auto-pay</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in subs_by_plan %}
+                        <tr class="border-b border-slate-50">
+                            <td class="py-2 font-medium">{{ row.plan_label or row.plan_id }}</td>
+                            <td class="text-right">{{ fmt_int(row.active_count) }}</td>
+                            <td class="text-right">{{ fmt_rub(row.mrr_rub) }}</td>
+                            <td class="text-right">{{ fmt_rub(row.arpu_rub) }}</td>
+                            <td class="text-right">{{ fmt_int(row.with_auto_pay) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="text-slate-400 text-sm">Активных подписок пока нет.</p>
+                {% endif %}
+            </div>
+            <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+                <h2 class="text-lg font-semibold mb-4">AI расходы по типам (30 дней)</h2>
+                {% if ai_breakdown %}
+                <table class="w-full text-sm">
+                    <thead class="text-xs uppercase text-slate-500">
+                        <tr class="border-b">
+                            <th class="text-left py-2">Тип</th>
+                            <th class="text-right">Запросов</th>
+                            <th class="text-right">Юзеров</th>
+                            <th class="text-right">Cost</th>
+                            <th class="text-right">Avg latency</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in ai_breakdown %}
+                        <tr class="border-b border-slate-50">
+                            <td class="py-2 font-medium">{{ row.request_type }}</td>
+                            <td class="text-right">{{ fmt_int(row.requests) }}</td>
+                            <td class="text-right">{{ fmt_int(row.unique_users) }}</td>
+                            <td class="text-right">{{ fmt_rub(row.cost_rub) }}</td>
+                            <td class="text-right">{{ fmt_int(row.avg_latency_ms) }} ms</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="text-slate-400 text-sm">Запросов к AI пока не было.</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- DAU/WAU/MAU -->
+        <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100 mb-8">
+            <h2 class="text-lg font-semibold mb-4">DAU / WAU / MAU (90 дней)</h2>
+            <div class="chart-container" style="height: 360px;"><canvas id="dauMauChart"></canvas></div>
+        </div>
+
+        <!-- Heavy AI users -->
+        <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100 mb-8">
+            <h2 class="text-lg font-semibold mb-4">Top 10 пользователей по AI расходам</h2>
+            {% if heavy_users %}
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="text-xs uppercase text-slate-500">
+                        <tr class="border-b">
+                            <th class="text-left py-2">User ID</th>
+                            <th class="text-left">Регистрация</th>
+                            <th class="text-right">Revenue (lifetime)</th>
+                            <th class="text-right">AI cost (lifetime)</th>
+                            <th class="text-right">AI requests</th>
+                            <th class="text-right">Margin</th>
+                            <th class="text-left">План</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for u in heavy_users %}
+                        <tr class="border-b border-slate-50">
+                            <td class="py-2 font-mono text-xs">{{ u.user_id }}</td>
+                            <td class="text-slate-500">{{ fmt_date(u.user_created_at) }}</td>
+                            <td class="text-right">{{ fmt_rub(u.lifetime_revenue_rub) }}</td>
+                            <td class="text-right">{{ fmt_rub(u.lifetime_ai_cost_rub) }}</td>
+                            <td class="text-right">{{ fmt_int(u.lifetime_ai_requests) }}</td>
+                            <td class="text-right
+                                {% if u.gross_margin_rub|float < 0 %}text-rose-600{% else %}text-emerald-600{% endif %}">
+                                {{ fmt_rub(u.gross_margin_rub) }}
+                            </td>
+                            <td>
+                                {% if u.is_currently_paying %}
+                                    <span class="inline-block px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs">{{ u.current_plan_id or 'pro' }}</span>
+                                {% else %}
+                                    <span class="text-slate-400 text-xs">free</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <p class="text-slate-400 text-sm">AI запросов пока не было.</p>
+            {% endif %}
+        </div>
+
+        <!-- Signup → Paid funnel -->
+        <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100 mb-8">
+            <h2 class="text-lg font-semibold mb-4">Воронка signup в paid (по неделям)</h2>
+            {% if signup_funnel %}
+            <table class="w-full text-sm">
+                <thead class="text-xs uppercase text-slate-500">
+                    <tr class="border-b">
+                        <th class="text-left py-2">Неделя</th>
+                        <th class="text-right">Регистраций</th>
+                        <th class="text-right">Конвертировались</th>
+                        <th class="text-right">Conversion %</th>
+                        <th class="text-right">Cohort revenue</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in signup_funnel %}
+                    <tr class="border-b border-slate-50">
+                        <td class="py-2 font-medium">{{ fmt_date(row.signup_week) }}</td>
+                        <td class="text-right">{{ fmt_int(row.signups) }}</td>
+                        <td class="text-right">{{ fmt_int(row.converted_to_paid) }}</td>
+                        <td class="text-right">{{ fmt_pct(row.conversion_rate_pct) }}</td>
+                        <td class="text-right">{{ fmt_rub(row.cohort_revenue_rub) }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p class="text-slate-400 text-sm">Регистраций пока нет.</p>
+            {% endif %}
+        </div>
+
+        <div class="text-center text-xs text-slate-400 pb-8">
+            Bloom AI Analytics. Курс USD/RUB зафиксирован 95 ₽.
+        </div>
+    </div>
+
+    <script>
+        // Данные для графиков
+        const revenueData = {{ revenue_chart|tojson }};
+        const costRevenueData = {{ cost_vs_revenue|tojson }};
+        const dauMauData = {{ dau_mau_chart|tojson }};
+
+        // Common options
+        const commonOptions = {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'top', labels: { font: { size: 12 } } }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        callback: v => Number(v).toLocaleString('ru-RU') + ' ₽'
+                    }
+                }
+            }
+        };
+
+        // 1. Revenue chart (stacked bars)
+        new Chart(document.getElementById('revenueChart'), {
+            type: 'bar',
+            data: {
+                labels: revenueData.labels,
+                datasets: [
+                    {
+                        label: 'Recurring',
+                        data: revenueData.recurring,
+                        backgroundColor: '#10b981',
+                    },
+                    {
+                        label: 'New',
+                        data: revenueData.new,
+                        backgroundColor: '#3b82f6',
+                    },
+                ]
+            },
+            options: {
+                ...commonOptions,
+                scales: {
+                    x: { stacked: true },
+                    y: {
+                        ...commonOptions.scales.y,
+                        stacked: true,
+                    }
+                }
+            }
+        });
+
+        // 2. AI cost vs Revenue
+        new Chart(document.getElementById('costRevenueChart'), {
+            type: 'line',
+            data: {
+                labels: costRevenueData.labels,
+                datasets: [
+                    {
+                        label: 'Revenue',
+                        data: costRevenueData.revenue,
+                        borderColor: '#10b981',
+                        backgroundColor: '#10b98122',
+                        tension: 0.3,
+                        fill: true,
+                    },
+                    {
+                        label: 'AI cost',
+                        data: costRevenueData.ai_cost,
+                        borderColor: '#ef4444',
+                        backgroundColor: '#ef444422',
+                        tension: 0.3,
+                        fill: true,
+                    },
+                ]
+            },
+            options: commonOptions
+        });
+
+        // 3. DAU/WAU/MAU
+        new Chart(document.getElementById('dauMauChart'), {
+            type: 'line',
+            data: {
+                labels: dauMauData.labels,
+                datasets: [
+                    {
+                        label: 'DAU',
+                        data: dauMauData.dau,
+                        borderColor: '#10b981',
+                        backgroundColor: 'transparent',
+                        tension: 0.2,
+                    },
+                    {
+                        label: 'WAU',
+                        data: dauMauData.wau,
+                        borderColor: '#3b82f6',
+                        backgroundColor: 'transparent',
+                        tension: 0.2,
+                    },
+                    {
+                        label: 'MAU',
+                        data: dauMauData.mau,
+                        borderColor: '#8b5cf6',
+                        backgroundColor: 'transparent',
+                        tension: 0.2,
+                    },
+                ]
+            },
+            options: {
+                ...commonOptions,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: { callback: v => Number(v).toLocaleString('ru-RU') }
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>
