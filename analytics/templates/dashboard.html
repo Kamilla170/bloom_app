@@ -16,20 +16,18 @@
             border-bottom: 2px solid transparent;
             transition: all 0.15s ease;
         }
-        .tab-btn:hover {
-            color: #0f172a;
-        }
+        .tab-btn:hover { color: #0f172a; }
         .tab-btn.active {
             border-bottom-color: #10b981;
             color: #0f172a;
             font-weight: 600;
         }
+        .matrix-cell { font-feature-settings: 'tnum' on, 'lnum' on; }
     </style>
 </head>
 <body class="bg-slate-50 text-slate-900">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
-        <!-- Header -->
         <div class="flex items-center justify-between mb-6">
             <div>
                 <h1 class="text-3xl font-bold text-slate-900">🌱 Bloom AI Analytics</h1>
@@ -41,33 +39,19 @@
             </button>
         </div>
 
-        <!-- Tabs nav -->
         <div class="border-b border-slate-200 mb-8">
             <nav class="flex gap-6 overflow-x-auto -mb-px">
-                <button data-tab="overview" class="tab-btn py-3 px-1 text-sm text-slate-500 whitespace-nowrap active">
-                    Обзор
-                </button>
-                <button data-tab="subscriptions" class="tab-btn py-3 px-1 text-sm text-slate-500 whitespace-nowrap">
-                    Подписки
-                </button>
-                <button data-tab="unit-economics" class="tab-btn py-3 px-1 text-sm text-slate-500 whitespace-nowrap">
-                    Юнит-экономика
-                </button>
-                <button data-tab="cohorts" class="tab-btn py-3 px-1 text-sm text-slate-500 whitespace-nowrap">
-                    Когорты
-                </button>
-                <button data-tab="product" class="tab-btn py-3 px-1 text-sm text-slate-500 whitespace-nowrap">
-                    Продукт
-                </button>
+                <button data-tab="overview" class="tab-btn py-3 px-1 text-sm text-slate-500 whitespace-nowrap active">Обзор</button>
+                <button data-tab="subscriptions" class="tab-btn py-3 px-1 text-sm text-slate-500 whitespace-nowrap">Подписки</button>
+                <button data-tab="unit-economics" class="tab-btn py-3 px-1 text-sm text-slate-500 whitespace-nowrap">Юнит-экономика</button>
+                <button data-tab="cohorts" class="tab-btn py-3 px-1 text-sm text-slate-500 whitespace-nowrap">Когорты</button>
+                <button data-tab="product" class="tab-btn py-3 px-1 text-sm text-slate-500 whitespace-nowrap">Продукт</button>
             </nav>
         </div>
 
-        <!-- ============================================================ -->
         <!-- TAB: Обзор -->
-        <!-- ============================================================ -->
         <div id="tab-overview" class="tab-panel active">
 
-            <!-- KPI Cards -->
             <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
                 <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
                     <div class="text-xs text-slate-500 uppercase tracking-wider">MRR</div>
@@ -104,7 +88,6 @@
                 </div>
             </div>
 
-            <!-- Revenue + AI Cost Charts -->
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
                 <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
                     <h2 class="text-lg font-semibold mb-4">Выручка по месяцам</h2>
@@ -116,7 +99,6 @@
                 </div>
             </div>
 
-            <!-- Subscriptions by plan + AI breakdown -->
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
                 <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
                     <h2 class="text-lg font-semibold mb-4">Подписки по тарифам</h2>
@@ -178,13 +160,11 @@
                 </div>
             </div>
 
-            <!-- DAU/WAU/MAU -->
             <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100 mb-8">
                 <h2 class="text-lg font-semibold mb-4">DAU / WAU / MAU (90 дней)</h2>
                 <div class="chart-container" style="height: 360px;"><canvas id="dauMauChart"></canvas></div>
             </div>
 
-            <!-- Heavy AI users -->
             <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100 mb-8">
                 <h2 class="text-lg font-semibold mb-4">Top 10 пользователей по AI расходам</h2>
                 {% if heavy_users %}
@@ -230,7 +210,6 @@
                 {% endif %}
             </div>
 
-            <!-- Signup → Paid funnel -->
             <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100 mb-8">
                 <h2 class="text-lg font-semibold mb-4">Воронка signup в paid (по неделям)</h2>
                 {% if signup_funnel %}
@@ -263,65 +242,163 @@
 
         </div>
 
-        <!-- ============================================================ -->
         <!-- TAB: Подписки -->
-        <!-- ============================================================ -->
         <div id="tab-subscriptions" class="tab-panel">
-            <div class="bg-white rounded-xl p-8 shadow-sm border border-slate-100">
-                <h2 class="text-xl font-semibold mb-2">Подписки: lifecycle и churn</h2>
-                <p class="text-sm text-slate-500 mb-6">
-                    Метрики появятся после набора данных. Нужно: события в <code class="text-xs bg-slate-100 px-1.5 py-0.5 rounded">subscription_events</code>
-                    и минимум 30 дней реальных подписок.
-                </p>
 
-                <h3 class="text-sm font-semibold text-slate-700 uppercase tracking-wider mb-3">Что здесь будет</h3>
-                <ul class="space-y-2 text-sm text-slate-600">
-                    <li class="flex gap-2"><span class="text-slate-400">·</span> Voluntary vs Involuntary churn (отменил сам vs не прошёл платёж)</li>
-                    <li class="flex gap-2"><span class="text-slate-400">·</span> Days-to-churn distribution: на каком дне жизни юзер чаще отваливается</li>
-                    <li class="flex gap-2"><span class="text-slate-400">·</span> Plan distribution active: сколько на 1/3/6/12 мес сейчас</li>
-                    <li class="flex gap-2"><span class="text-slate-400">·</span> Plan switching matrix: кто и куда апгрейдит/даунгрейдит</li>
-                    <li class="flex gap-2"><span class="text-slate-400">·</span> Reactivation rate: сколько % отменивших возвращаются за N дней</li>
-                    <li class="flex gap-2"><span class="text-slate-400">·</span> Net MRR Movement: New plus Expansion минус Churn минус Contraction</li>
-                    <li class="flex gap-2"><span class="text-slate-400">·</span> Quick Ratio: (New plus Expansion) / (Churn plus Contraction)</li>
-                    <li class="flex gap-2"><span class="text-slate-400">·</span> Refund rate (из <code class="text-xs bg-slate-100 px-1.5 py-0.5 rounded">yookassa_webhooks_log</code>)</li>
-                    <li class="flex gap-2"><span class="text-slate-400">·</span> Failed payment rate при автопродлении (involuntary churn)</li>
-                </ul>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
+                    <div class="text-xs text-slate-500 uppercase tracking-wider">Всего ушло</div>
+                    <div class="text-2xl font-bold mt-2 kpi-value">{{ fmt_int(churn_summary.total_churned) }}</div>
+                    <div class="text-xs text-slate-400 mt-1">за 30д: {{ fmt_int(churn_summary.churned_30d) }}</div>
+                </div>
+                <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
+                    <div class="text-xs text-slate-500 uppercase tracking-wider">Involuntary churn</div>
+                    <div class="text-2xl font-bold mt-2 kpi-value
+                        {% if churn_summary.involuntary_pct and churn_summary.involuntary_pct|float > 20 %}text-rose-600{% else %}text-slate-900{% endif %}">
+                        {{ fmt_pct(churn_summary.involuntary_pct) }}
+                    </div>
+                    <div class="text-xs text-slate-400 mt-1">{{ fmt_int(churn_summary.involuntary) }} из {{ fmt_int(churn_summary.total_churned) }}</div>
+                </div>
+                <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
+                    <div class="text-xs text-slate-500 uppercase tracking-wider">Median days-to-churn</div>
+                    <div class="text-2xl font-bold mt-2 kpi-value">{{ fmt_int(churn_summary.median_days_to_churn) }}</div>
+                    <div class="text-xs text-slate-400 mt-1">avg: {{ fmt_int(churn_summary.avg_days_to_churn) }} дней</div>
+                </div>
+                <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
+                    <div class="text-xs text-slate-500 uppercase tracking-wider">Reactivation 30d</div>
+                    <div class="text-2xl font-bold mt-2 kpi-value text-emerald-600">{{ fmt_pct(reactivation.rate_30d_pct) }}</div>
+                    <div class="text-xs text-slate-400 mt-1">{{ fmt_int(reactivation.reactivated_30d) }} из {{ fmt_int(reactivation.total_churn_events) }}</div>
+                </div>
             </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+                    <h2 class="text-lg font-semibold mb-1">Churn по месяцам</h2>
+                    <p class="text-xs text-slate-500 mb-4">Voluntary (отменил сам) vs Involuntary (не прошёл платёж)</p>
+                    <div class="chart-container"><canvas id="churnChart"></canvas></div>
+                </div>
+                <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+                    <h2 class="text-lg font-semibold mb-1">Net MRR Movement</h2>
+                    <p class="text-xs text-slate-500 mb-4">New plus Expansion минус Churn минус Contraction (₽/мес)</p>
+                    <div class="chart-container"><canvas id="mrrMovementChart"></canvas></div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+                    <h2 class="text-lg font-semibold mb-1">Quick Ratio по месяцам</h2>
+                    <p class="text-xs text-slate-500 mb-4">(New plus Expansion) / (Churn plus Contraction). Здоровый рост: больше 4</p>
+                    <div class="chart-container"><canvas id="quickRatioChart"></canvas></div>
+                </div>
+                <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+                    <h2 class="text-lg font-semibold mb-1">Распределение дней до churn</h2>
+                    <p class="text-xs text-slate-500 mb-4">От первой активации PRO до момента churn</p>
+                    <div class="chart-container"><canvas id="daysToChurnChart"></canvas></div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+                    <h2 class="text-lg font-semibold mb-1">Переходы между тарифами</h2>
+                    <p class="text-xs text-slate-500 mb-4">За последние 90 дней. Строки: откуда. Колонки: куда.</p>
+                    <table class="w-full text-sm matrix-cell">
+                        <thead class="text-xs uppercase text-slate-500">
+                            <tr class="border-b">
+                                <th class="text-left py-2 pr-3">Из / В</th>
+                                {% for col in plan_switching_matrix.cols %}
+                                <th class="text-right px-2">{{ col }}</th>
+                                {% endfor %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for i in range(plan_switching_matrix.rows|length) %}
+                            <tr class="border-b border-slate-50">
+                                <td class="py-2 pr-3 font-medium">{{ plan_switching_matrix.rows[i] }}</td>
+                                {% for j in range(plan_switching_matrix.cols|length) %}
+                                <td class="text-right px-2 {% if i == j %}text-slate-300{% elif plan_switching_matrix.matrix[i][j] > 0 %}text-emerald-600 font-semibold{% else %}text-slate-300{% endif %}">
+                                    {% if i == j %}-{% else %}{{ plan_switching_matrix.matrix[i][j] }}{% endif %}
+                                </td>
+                                {% endfor %}
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+                    <h2 class="text-lg font-semibold mb-1">Reactivation: возвращение после churn</h2>
+                    <p class="text-xs text-slate-500 mb-4">% churn-событий, после которых был успешный платёж в окне. Учитываются churn старше 30 дней.</p>
+                    <table class="w-full text-sm">
+                        <thead class="text-xs uppercase text-slate-500">
+                            <tr class="border-b">
+                                <th class="text-left py-2">Окно</th>
+                                <th class="text-right">Вернулись</th>
+                                <th class="text-right">% от churn</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr class="border-b border-slate-50">
+                                <td class="py-2 font-medium">За 30 дней</td>
+                                <td class="text-right">{{ fmt_int(reactivation.reactivated_30d) }}</td>
+                                <td class="text-right font-semibold">{{ fmt_pct(reactivation.rate_30d_pct) }}</td>
+                            </tr>
+                            <tr class="border-b border-slate-50">
+                                <td class="py-2 font-medium">За 60 дней</td>
+                                <td class="text-right">{{ fmt_int(reactivation.reactivated_60d) }}</td>
+                                <td class="text-right font-semibold">{{ fmt_pct(reactivation.rate_60d_pct) }}</td>
+                            </tr>
+                            <tr class="border-b border-slate-50">
+                                <td class="py-2 font-medium">За 90 дней</td>
+                                <td class="text-right">{{ fmt_int(reactivation.reactivated_90d) }}</td>
+                                <td class="text-right font-semibold">{{ fmt_pct(reactivation.rate_90d_pct) }}</td>
+                            </tr>
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                <td class="pt-3 text-xs text-slate-400" colspan="3">Всего churn-событий: {{ fmt_int(reactivation.total_churn_events) }}</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+                    <h2 class="text-lg font-semibold mb-1">Refund rate по месяцам</h2>
+                    <p class="text-xs text-slate-500 mb-4">% возвратов от successful платежей</p>
+                    <div class="chart-container"><canvas id="refundChart"></canvas></div>
+                </div>
+                <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+                    <h2 class="text-lg font-semibold mb-1">Failed recurring payments</h2>
+                    <p class="text-xs text-slate-500 mb-4">% неуспешных автопродлений (involuntary churn)</p>
+                    <div class="chart-container"><canvas id="failedChart"></canvas></div>
+                </div>
+            </div>
+
         </div>
 
-        <!-- ============================================================ -->
         <!-- TAB: Юнит-экономика -->
-        <!-- ============================================================ -->
         <div id="tab-unit-economics" class="tab-panel">
             <div class="bg-white rounded-xl p-8 shadow-sm border border-slate-100">
                 <h2 class="text-xl font-semibold mb-2">Юнит-экономика</h2>
-                <p class="text-sm text-slate-500 mb-6">
-                    Метрики появятся после набора данных. Нужно: реальные платящие юзеры (не тестовые) и история AI расходов хотя бы за месяц.
-                </p>
-
+                <p class="text-sm text-slate-500 mb-6">Метрики появятся после набора данных.</p>
                 <h3 class="text-sm font-semibold text-slate-700 uppercase tracking-wider mb-3">Что здесь будет</h3>
                 <ul class="space-y-2 text-sm text-slate-600">
                     <li class="flex gap-2"><span class="text-slate-400">·</span> AI cost per active user (среднее, медиана)</li>
                     <li class="flex gap-2"><span class="text-slate-400">·</span> Gross margin distribution: гистограмма margin по юзерам, % unit-negative</li>
                     <li class="flex gap-2"><span class="text-slate-400">·</span> AI cost by feature: photo_analysis vs qa vs growing_plan</li>
                     <li class="flex gap-2"><span class="text-slate-400">·</span> Heavy users top N с разрезом по типам запросов</li>
-                    <li class="flex gap-2"><span class="text-slate-400">·</span> LTV by signup cohort: cumulative revenue по месяцам жизни (0, 1, 2, 3, ...)</li>
+                    <li class="flex gap-2"><span class="text-slate-400">·</span> LTV by signup cohort: cumulative revenue по месяцам жизни</li>
                     <li class="flex gap-2"><span class="text-slate-400">·</span> LTV vs AI cost by cohort на одном графике</li>
                     <li class="flex gap-2"><span class="text-slate-400">·</span> Payback period: дни от регистрации до момента, когда платежи перекрыли AI расходы</li>
                 </ul>
             </div>
         </div>
 
-        <!-- ============================================================ -->
         <!-- TAB: Когорты -->
-        <!-- ============================================================ -->
         <div id="tab-cohorts" class="tab-panel">
             <div class="bg-white rounded-xl p-8 shadow-sm border border-slate-100">
                 <h2 class="text-xl font-semibold mb-2">Когорты и retention</h2>
-                <p class="text-sm text-slate-500 mb-6">
-                    Метрики появятся после набора данных. Нужно: минимум 60 дней истории, чтобы было что сравнивать между когортами.
-                </p>
-
+                <p class="text-sm text-slate-500 mb-6">Метрики появятся после набора данных.</p>
                 <h3 class="text-sm font-semibold text-slate-700 uppercase tracking-wider mb-3">Что здесь будет</h3>
                 <ul class="space-y-2 text-sm text-slate-600">
                     <li class="flex gap-2"><span class="text-slate-400">·</span> Signup cohort table: классическая треугольная таблица retention</li>
@@ -332,24 +409,17 @@
             </div>
         </div>
 
-        <!-- ============================================================ -->
         <!-- TAB: Продукт -->
-        <!-- ============================================================ -->
         <div id="tab-product" class="tab-panel">
             <div class="bg-white rounded-xl p-8 shadow-sm border border-slate-100">
                 <h2 class="text-xl font-semibold mb-2">Продуктовые метрики</h2>
-                <p class="text-sm text-slate-500 mb-6">
-                    Метрики появятся после набора данных. Нужно: реальные пользователи, активность в БД (растения, фото, вопросы).
-                </p>
-
+                <p class="text-sm text-slate-500 mb-6">Метрики появятся после набора данных.</p>
                 <h3 class="text-sm font-semibold text-slate-700 uppercase tracking-wider mb-3">Что здесь будет</h3>
                 <ul class="space-y-2 text-sm text-slate-600">
                     <li class="flex gap-2"><span class="text-slate-400">·</span> Plants per user: среднее, медиана, распределение</li>
                     <li class="flex gap-2"><span class="text-slate-400">·</span> AI questions per user per week</li>
                     <li class="flex gap-2"><span class="text-slate-400">·</span> Photos uploaded per user (драйвер Cloudinary costs)</li>
                     <li class="flex gap-2"><span class="text-slate-400">·</span> Care actions logged: полив, удобрение (предиктор retention)</li>
-                    <li class="flex gap-2"><span class="text-slate-400">·</span> Achievements progression (когда появится таблица achievements)</li>
-                    <li class="flex gap-2"><span class="text-slate-400">·</span> Streak metrics (когда появится поле streak в users)</li>
                     <li class="flex gap-2"><span class="text-slate-400">·</span> Free tier: % free users hitting limit, time to limit, limit-to-paywall conversion</li>
                     <li class="flex gap-2"><span class="text-slate-400">·</span> Activation funnel: signup, plant_added, photo_diagnosis, paywall_viewed, payment</li>
                     <li class="flex gap-2"><span class="text-slate-400">·</span> Notification CTR (когда заведём события push_sent / push_opened)</li>
@@ -363,9 +433,6 @@
     </div>
 
     <script>
-        // ============================================================
-        // Tab switching
-        // ============================================================
         const TAB_STORAGE_KEY = 'bloom_analytics_active_tab';
 
         function switchTab(tabName) {
@@ -382,7 +449,6 @@
             btn.addEventListener('click', () => switchTab(btn.dataset.tab));
         });
 
-        // Restore last active tab
         try {
             const saved = localStorage.getItem(TAB_STORAGE_KEY);
             if (saved && document.getElementById('tab-' + saved)) {
@@ -390,29 +456,36 @@
             }
         } catch (e) {}
 
-        // ============================================================
-        // Charts
-        // ============================================================
+        // Charts data
         const revenueData = {{ revenue_chart|tojson }};
         const costRevenueData = {{ cost_vs_revenue|tojson }};
         const dauMauData = {{ dau_mau_chart|tojson }};
+        const churnData = {{ churn_chart|tojson }};
+        const mrrMovementData = {{ mrr_movement_chart|tojson }};
+        const daysToChurnData = {{ days_to_churn_chart|tojson }};
+        const refundData = {{ refund_chart|tojson }};
+        const failedData = {{ failed_chart|tojson }};
 
+        const rubScaleY = {
+            beginAtZero: true,
+            ticks: { callback: v => Number(v).toLocaleString('ru-RU') + ' ₽' }
+        };
+        const intScaleY = {
+            beginAtZero: true,
+            ticks: { callback: v => Number(v).toLocaleString('ru-RU') }
+        };
+        const pctScaleY = {
+            beginAtZero: true,
+            ticks: { callback: v => Number(v).toFixed(1) + ' %' }
+        };
         const commonOptions = {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: {
-                legend: { position: 'top', labels: { font: { size: 12 } } }
-            },
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    ticks: {
-                        callback: v => Number(v).toLocaleString('ru-RU') + ' ₽'
-                    }
-                }
-            }
+            plugins: { legend: { position: 'top', labels: { font: { size: 12 } } } },
+            scales: { y: rubScaleY }
         };
 
+        // Обзор
         new Chart(document.getElementById('revenueChart'), {
             type: 'bar',
             data: {
@@ -424,10 +497,7 @@
             },
             options: {
                 ...commonOptions,
-                scales: {
-                    x: { stacked: true },
-                    y: { ...commonOptions.scales.y, stacked: true }
-                }
+                scales: { x: { stacked: true }, y: { ...rubScaleY, stacked: true } }
             }
         });
 
@@ -436,22 +506,8 @@
             data: {
                 labels: costRevenueData.labels,
                 datasets: [
-                    {
-                        label: 'Revenue',
-                        data: costRevenueData.revenue,
-                        borderColor: '#10b981',
-                        backgroundColor: '#10b98122',
-                        tension: 0.3,
-                        fill: true,
-                    },
-                    {
-                        label: 'AI cost',
-                        data: costRevenueData.ai_cost,
-                        borderColor: '#ef4444',
-                        backgroundColor: '#ef444422',
-                        tension: 0.3,
-                        fill: true,
-                    },
+                    { label: 'Revenue', data: costRevenueData.revenue, borderColor: '#10b981', backgroundColor: '#10b98122', tension: 0.3, fill: true },
+                    { label: 'AI cost', data: costRevenueData.ai_cost, borderColor: '#ef4444', backgroundColor: '#ef444422', tension: 0.3, fill: true },
                 ]
             },
             options: commonOptions
@@ -467,14 +523,113 @@
                     { label: 'MAU', data: dauMauData.mau, borderColor: '#8b5cf6', backgroundColor: 'transparent', tension: 0.2 },
                 ]
             },
+            options: { ...commonOptions, scales: { y: intScaleY } }
+        });
+
+        // Подписки
+        new Chart(document.getElementById('churnChart'), {
+            type: 'bar',
+            data: {
+                labels: churnData.labels,
+                datasets: [
+                    { label: 'Voluntary', data: churnData.voluntary, backgroundColor: '#f59e0b' },
+                    { label: 'Involuntary', data: churnData.involuntary, backgroundColor: '#ef4444' },
+                    { label: 'Admin revoked', data: churnData.admin_revoked, backgroundColor: '#94a3b8' },
+                ]
+            },
             options: {
                 ...commonOptions,
+                scales: { x: { stacked: true }, y: { ...intScaleY, stacked: true } }
+            }
+        });
+
+        new Chart(document.getElementById('mrrMovementChart'), {
+            type: 'bar',
+            data: {
+                labels: mrrMovementData.labels,
+                datasets: [
+                    { label: 'New', data: mrrMovementData.new, backgroundColor: '#10b981' },
+                    { label: 'Expansion', data: mrrMovementData.expansion, backgroundColor: '#3b82f6' },
+                    { label: 'Contraction', data: mrrMovementData.contraction, backgroundColor: '#f59e0b' },
+                    { label: 'Churn', data: mrrMovementData.churn, backgroundColor: '#ef4444' },
+                ]
+            },
+            options: {
+                ...commonOptions,
+                scales: { x: { stacked: true }, y: { ...rubScaleY, stacked: true } }
+            }
+        });
+
+        new Chart(document.getElementById('quickRatioChart'), {
+            type: 'line',
+            data: {
+                labels: mrrMovementData.labels,
+                datasets: [
+                    {
+                        label: 'Quick Ratio',
+                        data: mrrMovementData.quick_ratio,
+                        borderColor: '#8b5cf6',
+                        backgroundColor: '#8b5cf622',
+                        tension: 0.2,
+                        fill: true,
+                        spanGaps: true,
+                    },
+                ]
+            },
+            options: {
+                ...commonOptions,
+                plugins: { legend: { display: false } },
                 scales: {
                     y: {
                         beginAtZero: true,
-                        ticks: { callback: v => Number(v).toLocaleString('ru-RU') }
+                        ticks: { callback: v => Number(v).toFixed(1) }
                     }
                 }
+            }
+        });
+
+        new Chart(document.getElementById('daysToChurnChart'), {
+            type: 'bar',
+            data: {
+                labels: daysToChurnData.labels,
+                datasets: [
+                    { label: 'Юзеров', data: daysToChurnData.counts, backgroundColor: '#8b5cf6' },
+                ]
+            },
+            options: {
+                ...commonOptions,
+                plugins: { legend: { display: false } },
+                scales: { y: intScaleY }
+            }
+        });
+
+        new Chart(document.getElementById('refundChart'), {
+            type: 'line',
+            data: {
+                labels: refundData.labels,
+                datasets: [
+                    { label: 'Refund rate %', data: refundData.rate, borderColor: '#ef4444', backgroundColor: '#ef444422', tension: 0.2, fill: true },
+                ]
+            },
+            options: {
+                ...commonOptions,
+                plugins: { legend: { display: false } },
+                scales: { y: pctScaleY }
+            }
+        });
+
+        new Chart(document.getElementById('failedChart'), {
+            type: 'line',
+            data: {
+                labels: failedData.labels,
+                datasets: [
+                    { label: 'Failed rate %', data: failedData.rate, borderColor: '#f59e0b', backgroundColor: '#f59e0b22', tension: 0.2, fill: true },
+                ]
+            },
+            options: {
+                ...commonOptions,
+                plugins: { legend: { display: false } },
+                scales: { y: pctScaleY }
             }
         });
     </script>
