@@ -104,6 +104,27 @@ async def is_pro(user_id: int) -> bool:
     return plan['plan'] == 'pro'
 
 
+def _format_time_until_reset(reset_date: Optional[datetime]) -> str:
+    """Форматирует время до сброса лимитов: 'Обновление через 5ч 23мин'"""
+    if not reset_date:
+        return ""
+    now = datetime.now()
+    delta = reset_date - now
+    total_seconds = int(delta.total_seconds())
+    if total_seconds <= 0:
+        return ""
+    hours = total_seconds // 3600
+    minutes = (total_seconds % 3600) // 60
+    if hours > 0 and minutes > 0:
+        return f"\n\n⏳ Обновление через {hours}ч {minutes}мин"
+    elif hours > 0:
+        return f"\n\n⏳ Обновление через {hours}ч"
+    elif minutes > 0:
+        return f"\n\n⏳ Обновление через {minutes}мин"
+    else:
+        return "\n\n⏳ Обновление меньше чем через минуту"
+
+
 async def check_limit(user_id: int, action: str) -> Tuple[bool, Optional[str]]:
     """
     Проверить лимит действия.
@@ -135,17 +156,21 @@ async def check_limit(user_id: int, action: str) -> Tuple[bool, Optional[str]]:
 
     elif action == 'analyses':
         if usage['analyses_used'] >= limit:
+            countdown = _format_time_until_reset(usage.get('reset_date'))
             return False, (
                 f"📸 Достигнут лимит бесплатного плана: <b>{limit} анализ фото</b> в день\n\n"
                 f"Оформите <b>подписку</b> для неограниченного доступа!"
+                f"{countdown}"
             )
         return True, None
 
     elif action == 'questions':
         if usage['questions_used'] >= limit:
+            countdown = _format_time_until_reset(usage.get('reset_date'))
             return False, (
                 f"🤖 Достигнут лимит бесплатного плана: <b>{limit} вопрос</b> в день\n\n"
                 f"Оформите <b>подписку</b> для неограниченного доступа!"
+                f"{countdown}"
             )
         return True, None
 
