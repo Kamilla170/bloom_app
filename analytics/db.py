@@ -1,11 +1,9 @@
 """
 Слой работы с БД.
-
 Подключается к основной Postgres Bloom AI через DATABASE_URL.
 Использует пул соединений asyncpg.
 Кэширует результаты запросов в памяти на CACHE_TTL_SECONDS секунд.
 """
-
 import os
 import time
 import logging
@@ -68,12 +66,10 @@ async def fetch(query: str, *args, cache_key: Optional[str] = None) -> list[dict
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(query, *args)
-
-    result = [dict(row) for row in rows]
+        result = [dict(row) for row in rows]
 
     if cache_key:
         _cache_set(cache_key, result)
-
     return result
 
 
@@ -87,17 +83,15 @@ async def fetchrow(query: str, *args, cache_key: Optional[str] = None) -> Option
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(query, *args)
-
-    result = dict(row) if row else None
+        result = dict(row) if row else None
 
     if cache_key:
         _cache_set(cache_key, result)
-
     return result
 
 
 # ============================================================
-# Запросы к analytics views
+# Обзор
 # ============================================================
 
 async def get_kpi_summary() -> dict:
@@ -286,3 +280,104 @@ async def get_overall_economics() -> dict:
         cache_key="overall_econ",
     )
     return dict(row) if row else {}
+
+
+# ============================================================
+# Подписки
+# ============================================================
+
+async def get_churn_summary() -> dict:
+    """KPI плашки для таба Подписки."""
+    row = await fetchrow(
+        "SELECT * FROM analytics.v_churn_summary",
+        cache_key="subs:churn_summary",
+    )
+    return dict(row) if row else {}
+
+
+async def get_churn_by_month() -> list[dict]:
+    """Voluntary vs involuntary churn по месяцам, 12 мес."""
+    return await fetch(
+        """
+        SELECT month, voluntary, involuntary, admin_revoked, total
+        FROM analytics.v_churn_by_month
+        ORDER BY month ASC
+        """,
+        cache_key="subs:churn_by_month",
+    )
+
+
+async def get_days_to_churn_distribution() -> list[dict]:
+    """Гистограмма дней до churn."""
+    return await fetch(
+        """
+        SELECT bucket_order, bucket_label, count
+        FROM analytics.v_days_to_churn_distribution
+        ORDER BY bucket_order ASC
+        """,
+        cache_key="subs:days_to_churn",
+    )
+
+
+async def get_reactivation() -> dict:
+    """Reactivation rate 30d/60d/90d."""
+    row = await fetchrow(
+        "SELECT * FROM analytics.v_reactivation",
+        cache_key="subs:reactivation",
+    )
+    return dict(row) if row else {}
+
+
+async def get_plan_switching() -> list[dict]:
+    """Матрица переходов между планами за 90 дней."""
+    return await fetch(
+        """
+        SELECT from_plan, to_plan, transitions, unique_users
+        FROM analytics.v_plan_switching
+        ORDER BY from_plan, to_plan
+        """,
+        cache_key="subs:plan_switching",
+    )
+
+
+async def get_mrr_movement_monthly() -> list[dict]:
+    """Net MRR Movement по месяцам, 12 мес."""
+    return await fetch(
+        """
+        SELECT
+            month,
+            new_mrr,
+            expansion_mrr,
+            contraction_mrr,
+            churn_mrr,
+            net_mrr_change,
+            quick_ratio
+        FROM analytics.v_mrr_movement_monthly
+        ORDER BY month ASC
+        """,
+        cache_key="subs:mrr_movement",
+    )
+
+
+async def get_refund_rate_monthly() -> list[dict]:
+    """Refund rate по месяцам, 12 мес."""
+    return await fetch(
+        """
+        SELECT month, payments, refunds, refund_rate_pct
+        FROM analytics.v_refund_rate_monthly
+        ORDER BY month ASC
+        """,
+        cache_key="subs:refund_rate",
+    )
+
+
+async def get_failed_payment_rate_monthly() -> list[dict]:
+    """Failed recurring payment rate по месяцам, 12 мес."""
+    return await fetch(
+        """
+        SELECT month, success, failed, failed_rate_pct
+        FROM analytics.v_failed_payment_rate_monthly
+        ORDER BY month ASC
+        """,
+        cache_key="subs:failed_payment_rate",
+    )
