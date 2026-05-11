@@ -4,20 +4,13 @@ Pydantic схемы для REST API
 
 from datetime import datetime, date
 from typing import Optional, List
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 
 
 # === AUTH ===
 
-class RegisterRequest(BaseModel):
-    email: EmailStr
-    password: str = Field(min_length=6, max_length=128)
-    first_name: Optional[str] = None
-
-
-class LoginRequest(BaseModel):
-    email: EmailStr
-    password: str
+class GoogleAuthRequest(BaseModel):
+    id_token: str
 
 
 class TokenResponse(BaseModel):
