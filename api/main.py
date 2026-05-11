@@ -31,11 +31,19 @@ async def run_app_migrations():
     """Все миграции для REST API"""
     db = await get_db()
     async with db.pool.acquire() as conn:
-        # --- Этап 0: app-авторизация ---
-        await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT UNIQUE")
-        await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT")
-        await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email IS NOT NULL")
-        logger.info("✅ Миграция: email, password_hash")
+        # --- Auth: OAuth провайдеры ---
+        # email теперь просто инфо-поле (без UNIQUE), заполняется из OAuth
+        await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT")
+        await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_provider TEXT")
+        await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS provider_user_id TEXT")
+        await conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_users_auth_provider
+            ON users(auth_provider, provider_user_id)
+            WHERE auth_provider IS NOT NULL
+        """)
+        # Удаляем старый уникальный индекс по email (если был) - теперь email не уникален
+        await conn.execute("DROP INDEX IF EXISTS idx_users_email")
+        logger.info("✅ Миграция: auth_provider, provider_user_id")
 
         # --- Этап 9: Аналитика и достижения ---
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS total_photos INT DEFAULT 0")
