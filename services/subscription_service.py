@@ -9,6 +9,12 @@ from services.analytics_recorder import record_subscription_event
 logger = logging.getLogger(__name__)
 
 
+def _next_midnight() -> datetime:
+    """Возвращает завтрашнюю полночь (00:00:00) для сброса суточных лимитов."""
+    now = datetime.now()
+    return (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+
 async def ensure_plan_columns():
     """Миграция: добавляем plan_amount, plan_days и plan_id в subscriptions"""
     db = await get_db()
@@ -130,7 +136,7 @@ async def check_limit(user_id: int, action: str) -> Tuple[bool, Optional[str]]:
     elif action == 'analyses':
         if usage['analyses_used'] >= limit:
             return False, (
-                f"📸 Достигнут лимит бесплатного плана: <b>{limit} анализа фото</b> в месяц\n\n"
+                f"📸 Достигнут лимит бесплатного плана: <b>{limit} анализ фото</b> в день\n\n"
                 f"Оформите <b>подписку</b> для неограниченного доступа!"
             )
         return True, None
@@ -138,7 +144,7 @@ async def check_limit(user_id: int, action: str) -> Tuple[bool, Optional[str]]:
     elif action == 'questions':
         if usage['questions_used'] >= limit:
             return False, (
-                f"🤖 Достигнут лимит бесплатного плана: <b>{limit} вопроса</b> в месяц\n\n"
+                f"🤖 Достигнут лимит бесплатного плана: <b>{limit} вопрос</b> в день\n\n"
                 f"Оформите <b>подписку</b> для неограниченного доступа!"
             )
         return True, None
@@ -180,7 +186,7 @@ async def get_or_create_usage(user_id: int) -> Dict:
         if row:
             now = datetime.now()
             if row['reset_date'] and row['reset_date'] <= now:
-                next_reset = (now.replace(day=1) + timedelta(days=32)).replace(day=1)
+                next_reset = _next_midnight()
                 await conn.execute("""
                     UPDATE usage_limits
                     SET analyses_used = 0, questions_used = 0, reset_date = $2
@@ -193,8 +199,7 @@ async def get_or_create_usage(user_id: int) -> Dict:
                 }
             return dict(row)
 
-        now = datetime.now()
-        next_reset = (now.replace(day=1) + timedelta(days=32)).replace(day=1)
+        next_reset = _next_midnight()
         await conn.execute("""
             INSERT INTO usage_limits (user_id, analyses_used, questions_used, reset_date)
             VALUES ($1, 0, 0, $2)
@@ -231,6 +236,7 @@ async def get_usage_stats(user_id: int) -> Dict:
         'analyses_limit': FREE_LIMITS['analyses'] if plan_info['plan'] == 'free' else '∞',
         'questions_used': usage['questions_used'],
         'questions_limit': FREE_LIMITS['questions'] if plan_info['plan'] == 'free' else '∞',
+        'resets_at': usage.get('reset_date'),
     }
 
 
@@ -422,9 +428,10 @@ async def revoke_pro(user_id: int):
 
 
 async def reset_all_usage_limits():
+    """Сброс лимитов у всех пользователей, у которых наступила дата сброса"""
     db = await get_db()
     now = datetime.now()
-    next_reset = (now.replace(day=1) + timedelta(days=32)).replace(day=1)
+    next_reset = _next_midnight()
 
     async with db.pool.acquire() as conn:
         await conn.execute("""
