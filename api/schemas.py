@@ -13,6 +13,10 @@ class GoogleAuthRequest(BaseModel):
     id_token: str
 
 
+class YandexAuthRequest(BaseModel):
+    access_token: str
+
+
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
