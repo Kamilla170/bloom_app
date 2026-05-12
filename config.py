@@ -36,7 +36,7 @@ SUBSCRIPTION_PLANS = {
 }
 
 DISCOUNT_PLANS = {
-    '1month': {'label': '1 месяц', 'price': 169, 'days': 30, 'original_price': 249},
+    '1month': {'label': '1 месяц', 'price': 1, 'days': 30, 'original_price': 249},
     '3months': {'label': '3 месяца', 'price': 399, 'days': 90, 'original_price': 599},
     '6months': {'label': '6 месяцев', 'price': 739, 'days': 180, 'original_price': 1099},
     '12months': {'label': '12 месяцев', 'price': 1369, 'days': 365, 'original_price': 2099},
