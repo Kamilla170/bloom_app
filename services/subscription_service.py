@@ -20,7 +20,7 @@ async def ensure_plan_columns():
     db = await get_db()
     async with db.pool.acquire() as conn:
         await conn.execute("""
-            ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS plan_amount INTEGER DEFAULT 199;
+            ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS plan_amount INTEGER DEFAULT 1;
         """)
         await conn.execute("""
             ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS plan_days INTEGER DEFAULT 30;
@@ -479,7 +479,7 @@ async def get_expiring_subscriptions(days_before: int = 1) -> list:
     async with db.pool.acquire() as conn:
         rows = await conn.fetch("""
             SELECT s.user_id, s.expires_at, s.auto_pay_method_id,
-                   COALESCE(s.plan_amount, 199) as plan_amount,
+                   COALESCE(s.plan_amount, 1) as plan_amount,
                    COALESCE(s.plan_days, 30) as plan_days,
                    s.plan_id
             FROM subscriptions s
