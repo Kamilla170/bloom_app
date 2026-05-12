@@ -4,6 +4,7 @@
 
 import os
 import logging
+import httpx
 from fastapi import APIRouter, HTTPException, status
 
 from google.oauth2 import id_token as google_id_token
@@ -11,7 +12,7 @@ from google.auth.transport import requests as google_requests
 
 from database import get_db
 from api.schemas import (
-    GoogleAuthRequest, RefreshRequest, TokenResponse
+    GoogleAuthRequest, YandexAuthRequest, RefreshRequest, TokenResponse
 )
 from api.auth.jwt import create_tokens, decode_token
 
@@ -24,6 +25,7 @@ APP_USER_ID_START = 5_000_000_000
 
 # OAuth client IDs из переменных окружения
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+YANDEX_CLIENT_ID = os.getenv("YANDEX_CLIENT_ID")
 
 
 async def _get_next_app_user_id(conn) -> int:
@@ -128,6 +130,87 @@ async def auth_google(req: GoogleAuthRequest):
             conn,
             provider="google",
             provider_user_id=google_sub,
+            email=email,
+            first_name=first_name,
+        )
+
+    return TokenResponse(**create_tokens(user_id))
+
+
+@router.post("/yandex", response_model=TokenResponse)
+async def auth_yandex(req: YandexAuthRequest):
+    """
+    Вход или регистрация через Yandex ID.
+    Принимает access_token, полученный Flutter-приложением в результате OAuth flow
+    через WebView (Custom Tabs / ASWebAuthenticationSession).
+    """
+    # Валидируем токен через login.yandex.ru/info
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                "https://login.yandex.ru/info",
+                params={"format": "json"},
+                headers={"Authorization": f"OAuth {req.access_token}"},
+            )
+    except httpx.HTTPError as e:
+        logger.warning(f"Ошибка запроса к Yandex info: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Не удалось проверить токен Yandex",
+        )
+
+    if response.status_code != 200:
+        logger.warning(
+            f"Невалидный Yandex token: status={response.status_code}, "
+            f"body={response.text[:200]}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Невалидный Yandex токен",
+        )
+
+    info = response.json()
+
+    yandex_id = info.get("id")
+    if not yandex_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Не удалось получить идентификатор пользователя от Yandex",
+        )
+
+    # Опционально проверяем, что токен выдан именно для нашего приложения.
+    # Защита от подсовывания токенов от других приложений Яндекса.
+    if YANDEX_CLIENT_ID:
+        token_client_id = info.get("client_id")
+        if token_client_id and token_client_id != YANDEX_CLIENT_ID:
+            logger.warning(
+                f"Yandex client_id mismatch: получен {token_client_id}, "
+                f"ожидался {YANDEX_CLIENT_ID}"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Токен выдан для другого приложения",
+            )
+
+    # Извлекаем email и имя
+    email = info.get("default_email")
+    if not email:
+        emails = info.get("emails") or []
+        email = emails[0] if emails else None
+
+    first_name = (
+        info.get("first_name")
+        or info.get("display_name")
+        or info.get("login")
+    )
+
+    # Находим или создаём юзера
+    db = await get_db()
+    async with db.pool.acquire() as conn:
+        user_id = await _find_or_create_user(
+            conn,
+            provider="yandex",
+            provider_user_id=str(yandex_id),
             email=email,
             first_name=first_name,
         )
