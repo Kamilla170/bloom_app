@@ -26,6 +26,7 @@ APP_USER_ID_START = 5_000_000_000
 # OAuth client IDs из переменных окружения
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 YANDEX_CLIENT_ID = os.getenv("YANDEX_CLIENT_ID")
+YANDEX_CLIENT_SECRET = os.getenv("YANDEX_CLIENT_SECRET")
 
 
 async def _get_next_app_user_id(conn) -> int:
@@ -137,20 +138,66 @@ async def auth_google(req: GoogleAuthRequest):
     return TokenResponse(**create_tokens(user_id))
 
 
-@router.post("/yandex", response_model=TokenResponse)
-async def auth_yandex(req: YandexAuthRequest):
+async def _exchange_yandex_code_for_token(code: str) -> str:
     """
-    Вход или регистрация через Yandex ID.
-    Принимает access_token, полученный Flutter-приложением в результате OAuth flow
-    через WebView (Custom Tabs / ASWebAuthenticationSession).
+    Обменивает authorization code на access_token через oauth.yandex.ru/token.
+    Возвращает access_token. Бросает HTTPException при ошибках.
     """
-    # Валидируем токен через login.yandex.ru/info
+    if not YANDEX_CLIENT_ID or not YANDEX_CLIENT_SECRET:
+        logger.error("YANDEX_CLIENT_ID или YANDEX_CLIENT_SECRET не заданы")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Yandex авторизация не настроена",
+        )
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                "https://oauth.yandex.ru/token",
+                data={
+                    "grant_type": "authorization_code",
+                    "code": code,
+                },
+                auth=(YANDEX_CLIENT_ID, YANDEX_CLIENT_SECRET),
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+    except httpx.HTTPError as e:
+        logger.warning(f"Ошибка запроса к Yandex token endpoint: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Не удалось обменять код Yandex",
+        )
+
+    if response.status_code != 200:
+        logger.warning(
+            f"Yandex token обмен не удался: status={response.status_code}, "
+            f"body={response.text[:300]}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Невалидный или просроченный код Yandex",
+        )
+
+    payload = response.json()
+    access_token = payload.get("access_token")
+    if not access_token:
+        logger.warning(f"Yandex token endpoint: нет access_token в ответе: {payload}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Yandex не вернул access_token",
+        )
+
+    return access_token
+
+
+async def _fetch_yandex_user_info(access_token: str) -> dict:
+    """Запрашивает данные пользователя через login.yandex.ru/info."""
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(
                 "https://login.yandex.ru/info",
                 params={"format": "json"},
-                headers={"Authorization": f"OAuth {req.access_token}"},
+                headers={"Authorization": f"OAuth {access_token}"},
             )
     except httpx.HTTPError as e:
         logger.warning(f"Ошибка запроса к Yandex info: {e}")
@@ -161,7 +208,7 @@ async def auth_yandex(req: YandexAuthRequest):
 
     if response.status_code != 200:
         logger.warning(
-            f"Невалидный Yandex token: status={response.status_code}, "
+            f"Yandex info вернул ошибку: status={response.status_code}, "
             f"body={response.text[:200]}"
         )
         raise HTTPException(
@@ -169,7 +216,22 @@ async def auth_yandex(req: YandexAuthRequest):
             detail="Невалидный Yandex токен",
         )
 
-    info = response.json()
+    return response.json()
+
+
+@router.post("/yandex", response_model=TokenResponse)
+async def auth_yandex(req: YandexAuthRequest):
+    """
+    Вход или регистрация через Yandex ID.
+    Принимает authorization code, полученный мобильным клиентом из OAuth
+    callback (?code=...). Обменивает его на access_token через
+    oauth.yandex.ru/token и валидирует через login.yandex.ru/info.
+    """
+    # Шаг 1: обмен code на access_token
+    access_token = await _exchange_yandex_code_for_token(req.code)
+
+    # Шаг 2: валидируем токен и получаем данные пользователя
+    info = await _fetch_yandex_user_info(access_token)
 
     yandex_id = info.get("id")
     if not yandex_id:
@@ -177,20 +239,6 @@ async def auth_yandex(req: YandexAuthRequest):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Не удалось получить идентификатор пользователя от Yandex",
         )
-
-    # Опционально проверяем, что токен выдан именно для нашего приложения.
-    # Защита от подсовывания токенов от других приложений Яндекса.
-    if YANDEX_CLIENT_ID:
-        token_client_id = info.get("client_id")
-        if token_client_id and token_client_id != YANDEX_CLIENT_ID:
-            logger.warning(
-                f"Yandex client_id mismatch: получен {token_client_id}, "
-                f"ожидался {YANDEX_CLIENT_ID}"
-            )
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Токен выдан для другого приложения",
-            )
 
     # Извлекаем email и имя
     email = info.get("default_email")
