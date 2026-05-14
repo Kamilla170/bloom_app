@@ -14,7 +14,8 @@ class GoogleAuthRequest(BaseModel):
 
 
 class YandexAuthRequest(BaseModel):
-    access_token: str
+    """Authorization code, полученный мобильным клиентом через OAuth callback"""
+    code: str
 
 
 class TokenResponse(BaseModel):
