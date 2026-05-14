@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 
 from api.auth.dependencies import get_current_user
 from api.schemas import (
@@ -137,10 +138,10 @@ async def payment_webhook(request: Request):
         success = await handle_payment_webhook(payload)
         if success:
             return {"status": "ok"}
-        return {"status": "error"}, 400
+        return JSONResponse({"status": "error"}, status_code=400)
     except Exception as e:
         logger.error(f"❌ Payment webhook error: {e}", exc_info=True)
-        return {"status": "error"}, 500
+        return JSONResponse({"status": "error"}, status_code=500)
 
 
 @router.post("/cancel-auto", response_model=SuccessResponse)
