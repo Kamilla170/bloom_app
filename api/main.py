@@ -8,9 +8,9 @@ import sys
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import RedirectResponse
 
 # Добавляем корневую директорию проекта в sys.path
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -195,89 +195,28 @@ async def root():
     return {"message": "Bloom AI API", "docs": "/docs"}
 
 
-# === OAuth: auxiliary page для Yandex ID ===
+# === OAuth callback: серверный 302 на кастомную схему мобильного приложения ===
 #
-# Яндекс OAuth не любит кастомные схемы (bloomai://) в redirect_uri и валит
-# запрос с internal error. Поэтому на oauth.yandex.ru регистрируется HTTPS
-# адрес этой страницы, а она уже на стороне браузера через JS делает редирект
-# на кастомную схему мобильного приложения с тем же fragment (где access_token).
+# Yandex OAuth не поддерживает кастомные схемы (bloomai://) в redirect_uri.
+# Поэтому регистрируем HTTPS-страницу на нашем бэке, а она делает HTTP 302
+# на кастомную схему приложения. Именно HTTP 302 (Location header) важен:
+# Chrome Auth Tab API (Android 14+, Chrome 137+) ловит редирект на кастомную
+# схему только через серверный 302, не через JavaScript.
 #
-# Yandex отдаёт токен в fragment (после #), и fragment не попадает на сервер
-# при GET-запросе, поэтому работаем чисто на клиенте через window.location.hash.
+# Используем authorization code flow: code приходит в query параметрах
+# (не в fragment), поэтому сервер видит его и может пробросить в редирект.
 
-_YANDEX_CALLBACK_HTML = """<!DOCTYPE html>
-<html lang="ru">
-<head>
-<meta charset="utf-8">
-<title>Bloom AI: вход через Яндекс</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: #DCEDC8;
-    color: #1B5E20;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 100vh;
-    margin: 0;
-    text-align: center;
-    padding: 24px;
-    box-sizing: border-box;
-  }
-  .box { max-width: 360px; }
-  h1 { font-size: 20px; margin: 0 0 12px; }
-  p { font-size: 15px; margin: 0 0 16px; line-height: 1.4; }
-  a {
-    display: inline-block;
-    background: #2E7D32;
-    color: #fff;
-    text-decoration: none;
-    padding: 12px 20px;
-    border-radius: 12px;
-    font-weight: 600;
-  }
-</style>
-</head>
-<body>
-<div class="box">
-  <h1>Возврат в приложение Bloom AI</h1>
-  <p id="msg">Обработка авторизации, пожалуйста подождите...</p>
-  <a id="manual" href="#" style="display:none">Открыть приложение</a>
-</div>
-<script>
-(function () {
-  var hash = window.location.hash || '';
-  var search = window.location.search || '';
-  // Передаём всё что прислал Яндекс: либо fragment (implicit/token flow),
-  // либо query (code flow или ошибки), в зависимости от ответа.
-  var tail = hash || search;
-  var deepLink = 'bloomai://oauth/yandex/callback' + tail;
-
-  var manual = document.getElementById('manual');
-  manual.href = deepLink;
-  manual.style.display = 'inline-block';
-
-  // Пытаемся открыть приложение автоматически
-  try {
-    window.location.replace(deepLink);
-  } catch (e) {
-    document.getElementById('msg').textContent =
-      'Если приложение не открылось автоматически, нажмите кнопку ниже.';
-  }
-})();
-</script>
-</body>
-</html>
-"""
-
-
-@app.get("/oauth/yandex/callback", response_class=HTMLResponse)
-async def yandex_oauth_callback():
+@app.get("/oauth/yandex/callback")
+async def yandex_oauth_callback(request: Request):
     """
-    Auxiliary page для Yandex OAuth.
-    Принимает редирект от oauth.yandex.ru (на этот HTTPS-адрес), внутри
-    исполняет JS, который пробрасывает fragment (с access_token) на
-    кастомную схему мобильного приложения bloomai://oauth/yandex/callback.
+    Принимает редирект от oauth.yandex.ru и перенаправляет в мобильное
+    приложение через кастомную схему bloomai://.
+    Сохраняет все query параметры как есть (code, state, error и т.д.).
     """
-    return HTMLResponse(content=_YANDEX_CALLBACK_HTML)
+    qs = request.url.query
+    target = "bloomai://oauth/yandex/callback"
+    if qs:
+        target = f"{target}?{qs}"
+
+    # 302 Found с кастомной схемой в Location перехватывается AuthTab
+    return RedirectResponse(url=target, status_code=302)
