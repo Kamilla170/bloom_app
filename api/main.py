@@ -91,6 +91,26 @@ async def run_app_migrations():
 
         logger.info("✅ Миграция: аналитика и достижения (Этап 9)")
 
+        # --- Этап 9.1: уведомления о новых достижениях ---
+        # Колонка seen_at фиксирует факт показа тоста пользователю.
+        # Backfill критичен: при первом запуске после деплоя считаем все
+        # уже разблокированные ачивки виденными, чтобы юзеру не свалилась
+        # очередь из 20 тостов.
+        await conn.execute(
+            "ALTER TABLE user_achievements ADD COLUMN IF NOT EXISTS seen_at TIMESTAMPTZ"
+        )
+        await conn.execute("""
+            UPDATE user_achievements
+            SET seen_at = NOW()
+            WHERE seen_at IS NULL
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_user_achievements_unseen
+            ON user_achievements(user_id)
+            WHERE seen_at IS NULL
+        """)
+        logger.info("✅ Миграция: user_achievements.seen_at (Этап 9.1)")
+
         # --- ИИ чат: общий чат без растения ---
         try:
             await conn.execute(
@@ -169,7 +189,10 @@ from api.plants.router import router as plants_router
 from api.ai.router import router as ai_router
 from api.users.router import router as users_router
 from api.payments.router import router as payments_router
-from api.analytics.router import router as analytics_router
+from api.analytics.router import (
+    router as analytics_router,
+    achievements_router,
+)
 
 app.include_router(auth_router)
 app.include_router(plants_router)
@@ -177,6 +200,7 @@ app.include_router(ai_router)
 app.include_router(users_router)
 app.include_router(payments_router)
 app.include_router(analytics_router)
+app.include_router(achievements_router)
 
 
 # === Health check ===
