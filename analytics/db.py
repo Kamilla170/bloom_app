@@ -504,15 +504,3 @@ async def get_aarrr_retention() -> dict:
         cache_key="aarrr:retention",
     )
     return dict(row) if row else {}
-
-
-# ============================================================
-# AARRR pirate metrics summary
-# ============================================================
-
-async def get_aarrr_summary() -> dict:
-    row = await fetchrow(
-        "SELECT * FROM analytics.v_aarrr_summary",
-        cache_key="aarrr:summary",
-    )
-    return dict(row) if row else {}
