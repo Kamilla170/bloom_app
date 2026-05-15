@@ -189,9 +189,9 @@ async def analyze_photo(
     user_id: int = Depends(get_current_user),
 ):
     """Загрузить фото и получить анализ растения"""
-    allowed, error_msg = await check_limit(user_id, "analyses")
+    allowed, error_detail = await check_limit(user_id, "analyses")
     if not allowed:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=error_msg)
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=error_detail)
 
     image_bytes = await photo.read()
     if len(image_bytes) < 1000:
@@ -256,9 +256,9 @@ async def save_plant(
     user_id: int = Depends(get_current_user),
 ):
     """Сохранить проанализированное растение в коллекцию"""
-    allowed, error_msg = await check_limit(user_id, "plants")
+    allowed, error_detail = await check_limit(user_id, "plants")
     if not allowed:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=error_msg)
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=error_detail)
 
     analysis_data = _app_temp_analyses.get(req.temp_id)
     if not analysis_data or analysis_data["user_id"] != user_id:
@@ -429,9 +429,9 @@ async def _process_photo_update(
     Лимит не списывается, фото в Cloudinary не грузится, карточка растения не трогается.
     Решение что делать дальше принимает вызывающий эндпоинт.
     """
-    allowed, error_msg = await check_limit(user_id, "analyses")
+    allowed, error_detail = await check_limit(user_id, "analyses")
     if not allowed:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=error_msg)
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=error_detail)
 
     db = await get_db()
     plant = await db.get_plant_by_id(plant_id, user_id)
