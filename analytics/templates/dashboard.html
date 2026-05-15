@@ -50,6 +50,69 @@
 
         <!-- TAB: Обзор -->
         <div id="tab-overview" class="tab-panel active">
+            <!-- AARRR pirate summary -->
+            {% set status_class = {'great': 'text-emerald-600', 'normal': 'text-slate-900', 'alarm': 'text-rose-600', 'neutral': 'text-slate-400'} %}
+            {% set status_label = {'great': '✓ отлично', 'normal': '— норма', 'alarm': '✗ тревога', 'neutral': '— нет данных'} %}
+            {% set status_border = {'great': 'border-l-emerald-500', 'normal': 'border-l-slate-300', 'alarm': 'border-l-rose-500', 'neutral': 'border-l-slate-200'} %}
+
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-3">
+                <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-100 border-l-4 {{ status_border[aarrr.acquisition.status] }}">
+                    <div class="text-xs text-slate-500 uppercase tracking-wider">A · Acquisition</div>
+                    <div class="text-2xl font-bold mt-1 kpi-value {{ status_class[aarrr.acquisition.status] }}">{{ fmt_int(aarrr.acquisition.value) }}</div>
+                    <div class="text-xs mt-1">
+                        {% if aarrr.acquisition.trend_pct is not none %}
+                            <span class="{% if aarrr.acquisition.trend_pct|float > 0 %}text-emerald-600{% elif aarrr.acquisition.trend_pct|float < 0 %}text-rose-600{% else %}text-slate-400{% endif %}">
+                                {% if aarrr.acquisition.trend_pct|float > 0 %}+{% endif %}{{ '%.1f'|format(aarrr.acquisition.trend_pct|float) }}%
+                            </span>
+                            <span class="text-slate-400"> за 7д</span>
+                        {% else %}
+                            <span class="text-slate-400">signups за 7д</span>
+                        {% endif %}
+                    </div>
+                    <div class="text-xs text-slate-500 mt-1">{{ status_label[aarrr.acquisition.status] }}</div>
+                </div>
+
+                <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-100 border-l-4 {{ status_border[aarrr.activation.status] }}">
+                    <div class="text-xs text-slate-500 uppercase tracking-wider">A · Activation</div>
+                    <div class="text-2xl font-bold mt-1 kpi-value {{ status_class[aarrr.activation.status] }}">{{ fmt_pct(aarrr.activation.value) }}</div>
+                    <div class="text-xs text-slate-400 mt-1">aha за 7 дней</div>
+                    <div class="text-xs text-slate-500 mt-1">{{ status_label[aarrr.activation.status] }}</div>
+                </div>
+
+                <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-100 border-l-4 {{ status_border[aarrr.retention.status] }}">
+                    <div class="text-xs text-slate-500 uppercase tracking-wider">R · Retention</div>
+                    <div class="text-2xl font-bold mt-1 kpi-value {{ status_class[aarrr.retention.status] }}">{{ fmt_pct(aarrr.retention.value) }}</div>
+                    <div class="text-xs text-slate-400 mt-1">D28, посл. когорта</div>
+                    <div class="text-xs text-slate-500 mt-1">{{ status_label[aarrr.retention.status] }}</div>
+                </div>
+
+                <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-100 border-l-4 {{ status_border[aarrr.revenue.status] }}">
+                    <div class="text-xs text-slate-500 uppercase tracking-wider">R · Revenue</div>
+                    <div class="text-2xl font-bold mt-1 kpi-value {{ status_class[aarrr.revenue.status] }}">{{ fmt_rub(aarrr.revenue.current_mrr) }}</div>
+                    <div class="text-xs mt-1">
+                        {% if aarrr.revenue.trend_pct is not none %}
+                            <span class="{% if aarrr.revenue.trend_pct|float > 0 %}text-emerald-600{% elif aarrr.revenue.trend_pct|float < 0 %}text-rose-600{% else %}text-slate-400{% endif %}">
+                                {% if aarrr.revenue.trend_pct|float > 0 %}+{% endif %}{{ '%.1f'|format(aarrr.revenue.trend_pct|float) }}%
+                            </span>
+                            <span class="text-slate-400"> new MRR vs пр.мес</span>
+                        {% else %}
+                            <span class="text-slate-400">MRR сейчас</span>
+                        {% endif %}
+                    </div>
+                    <div class="text-xs text-slate-500 mt-1">{{ status_label[aarrr.revenue.status] }}</div>
+                </div>
+
+                <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-100 border-l-4 {{ status_border[aarrr.referral.status] }}">
+                    <div class="text-xs text-slate-500 uppercase tracking-wider">R · Referral</div>
+                    <div class="text-2xl font-bold mt-1 kpi-value text-slate-300">—</div>
+                    <div class="text-xs text-slate-400 mt-1">не настроено</div>
+                    <div class="text-xs text-slate-500 mt-1">нужна рефералка</div>
+                </div>
+            </div>
+            <p class="hint mb-8">
+                AARRR (пиратские метрики): фреймворк для consumer-продукта в начале пути. Пять букв = пять воронок: откуда приходят (Acquisition), доходят ли до ценности (Activation), возвращаются ли (Retention), платят ли (Revenue), приводят ли друзей (Referral). Красная плашка сигнал что эта буква сломана, зелёная норма. Это утренний взгляд на здоровье продукта за 5 секунд. Подробности по каждой букве смотри на других табах.
+            </p>
+
             <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-3">
                 <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
                     <div class="text-xs text-slate-500 uppercase tracking-wider">MRR</div>
