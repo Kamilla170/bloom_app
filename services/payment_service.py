@@ -1,6 +1,5 @@
 """
-Сервис платежей (API-версия)
-Уведомления через FCM вместо Telegram бота
+Сервис платежей (API-версия, in-app через YooKassa Mobile SDK)
 """
 
 import logging
@@ -10,7 +9,7 @@ from datetime import datetime
 from typing import Dict, Optional
 from base64 import b64encode
 
-from config import YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY, PRO_PRICE, WEBHOOK_URL
+from config import YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY, PRO_PRICE
 from services.analytics_recorder import (
     record_yookassa_webhook,
     mark_webhook_processed,
@@ -38,25 +37,36 @@ def _get_headers(idempotency_key: str = None) -> dict:
     return headers
 
 
-async def create_payment(user_id: int, amount: int = None, days: int = 30,
-                         plan_label: str = "1 месяц", plan_id: str = None,
-                         save_method: bool = True) -> Optional[Dict]:
-    """Создать платёж в YooKassa."""
+async def create_payment(
+    user_id: int,
+    payment_token: str,
+    amount: int = None,
+    days: int = 30,
+    plan_label: str = "1 месяц",
+    plan_id: str = None,
+    save_method: bool = True,
+) -> Optional[Dict]:
+    """
+    Создать платёж в YooKassa из payment_token, полученного на клиенте через SDK.
+    """
     if not YOOKASSA_SHOP_ID or not YOOKASSA_SECRET_KEY:
         logger.error("❌ YooKassa не настроена")
+        return None
+
+    if not payment_token:
+        logger.error("❌ Не передан payment_token")
         return None
 
     if amount is None:
         amount = PRO_PRICE
 
     idempotency_key = str(uuid.uuid4())
-    return_url = WEBHOOK_URL or "https://t.me/bloom_ai_bot"
     description = f"Bloom AI подписка - {plan_label} (пользователь {user_id})"
 
     payload = {
         "amount": {"value": f"{amount}.00", "currency": "RUB"},
         "capture": True,
-        "confirmation": {"type": "redirect", "return_url": return_url},
+        "payment_token": payment_token,
         "description": description,
         "metadata": {
             "user_id": str(user_id),
@@ -75,25 +85,37 @@ async def create_payment(user_id: int, amount: int = None, days: int = 30,
                 f"{YOOKASSA_API_URL}/payments",
                 headers=_get_headers(idempotency_key),
                 json=payload,
-                timeout=aiohttp.ClientTimeout(total=30)
+                timeout=aiohttp.ClientTimeout(total=30),
             ) as resp:
                 data = await resp.json()
 
                 if resp.status == 200:
-                    logger.info(f"✅ Платёж создан: {data['id']} user_id={user_id}, plan_id={plan_id}, {plan_label}, {amount}₽")
+                    logger.info(
+                        f"✅ Платёж создан: {data['id']} "
+                        f"user_id={user_id}, plan_id={plan_id}, {plan_label}, {amount}₽, "
+                        f"status={data.get('status')}"
+                    )
 
                     from database import get_db
                     db = await get_db()
                     async with db.pool.acquire() as conn:
-                        await conn.execute("""
+                        await conn.execute(
+                            """
                             INSERT INTO payments (payment_id, user_id, amount, currency, status, description, plan_id, created_at)
                             VALUES ($1, $2, $3, 'RUB', $4, $5, $6, CURRENT_TIMESTAMP)
-                        """, data['id'], user_id, amount, data['status'], description, plan_id)
+                            """,
+                            data["id"], user_id, amount, data["status"], description, plan_id,
+                        )
+
+                    # Если YooKassa требует подтверждение (3DS), вернём confirmation_url.
+                    # SDK на клиенте сам откроет его в WebView.
+                    confirmation = data.get("confirmation") or {}
+                    confirmation_url = confirmation.get("confirmation_url")
 
                     return {
-                        'payment_id': data['id'],
-                        'confirmation_url': data['confirmation']['confirmation_url'],
-                        'status': data['status'],
+                        "payment_id": data["id"],
+                        "status": data["status"],
+                        "confirmation_url": confirmation_url,
                     }
                 else:
                     logger.error(f"❌ Ошибка создания платежа: {resp.status} {data}")
@@ -104,10 +126,82 @@ async def create_payment(user_id: int, amount: int = None, days: int = 30,
         return None
 
 
-async def create_recurring_payment(user_id: int, payment_method_id: str,
-                                   amount: int = None, days: int = 30,
-                                   plan_id: str = None) -> Optional[Dict]:
-    """Создать рекуррентный платёж."""
+async def get_payment_status(payment_id: str) -> Optional[Dict]:
+    """
+    Получить актуальный статус платежа.
+    Сначала смотрим в БД, если статус не финальный - запрашиваем YooKassa.
+    """
+    from database import get_db
+    db = await get_db()
+
+    async with db.pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT payment_id, user_id, amount, status, plan_id FROM payments WHERE payment_id = $1",
+            payment_id,
+        )
+
+    if not row:
+        return None
+
+    status = row["status"]
+    if status in ("succeeded", "canceled"):
+        return {
+            "payment_id": row["payment_id"],
+            "status": status,
+            "amount": row["amount"],
+            "plan_id": row["plan_id"],
+        }
+
+    # Статус не финальный - спросим YooKassa
+    if not YOOKASSA_SHOP_ID or not YOOKASSA_SECRET_KEY:
+        return {
+            "payment_id": row["payment_id"],
+            "status": status,
+            "amount": row["amount"],
+            "plan_id": row["plan_id"],
+        }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{YOOKASSA_API_URL}/payments/{payment_id}",
+                headers=_get_headers(),
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    fresh_status = data.get("status", status)
+                    if fresh_status != status:
+                        async with db.pool.acquire() as conn:
+                            await conn.execute(
+                                "UPDATE payments SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE payment_id = $2",
+                                fresh_status, payment_id,
+                            )
+                    return {
+                        "payment_id": payment_id,
+                        "status": fresh_status,
+                        "amount": row["amount"],
+                        "plan_id": row["plan_id"],
+                    }
+    except Exception as e:
+        logger.error(f"❌ Не удалось получить статус платежа {payment_id}: {e}")
+
+    return {
+        "payment_id": row["payment_id"],
+        "status": status,
+        "amount": row["amount"],
+        "plan_id": row["plan_id"],
+    }
+
+
+async def create_recurring_payment(
+    user_id: int,
+    payment_method_id: str,
+    amount: int = None,
+    days: int = 30,
+    plan_id: str = None,
+) -> Optional[Dict]:
+    """Создать рекуррентный платёж по сохранённому методу."""
     if not YOOKASSA_SHOP_ID or not YOOKASSA_SECRET_KEY:
         return None
 
@@ -127,7 +221,7 @@ async def create_recurring_payment(user_id: int, payment_method_id: str,
             "days": str(days),
             "amount": str(amount),
             "plan_id": plan_id or "",
-        }
+        },
     }
 
     try:
@@ -136,37 +230,40 @@ async def create_recurring_payment(user_id: int, payment_method_id: str,
                 f"{YOOKASSA_API_URL}/payments",
                 headers=_get_headers(idempotency_key),
                 json=payload,
-                timeout=aiohttp.ClientTimeout(total=30)
+                timeout=aiohttp.ClientTimeout(total=30),
             ) as resp:
                 data = await resp.json()
 
                 if resp.status == 200:
-                    logger.info(f"✅ Рекуррентный платёж: {data['id']} user_id={user_id}, plan_id={plan_id}, {amount}₽/{days}д")
+                    logger.info(
+                        f"✅ Рекуррентный платёж: {data['id']} user_id={user_id}, plan_id={plan_id}, {amount}₽/{days}д"
+                    )
 
                     from database import get_db
                     db = await get_db()
                     async with db.pool.acquire() as conn:
-                        await conn.execute("""
+                        await conn.execute(
+                            """
                             INSERT INTO payments (payment_id, user_id, amount, currency, status, description, is_recurring, plan_id, created_at)
                             VALUES ($1, $2, $3, 'RUB', $4, $5, TRUE, $6, CURRENT_TIMESTAMP)
-                        """, data['id'], user_id, amount, data['status'], payload['description'], plan_id)
+                            """,
+                            data["id"], user_id, amount, data["status"], payload["description"], plan_id,
+                        )
 
-                    return {'payment_id': data['id'], 'status': data['status']}
+                    return {"payment_id": data["id"], "status": data["status"]}
                 else:
                     logger.error(f"❌ Рекуррентный платёж ошибка: {resp.status} {data}")
 
-                    # Аналитика: рекуррентный платёж не создан в YooKassa.
-                    # Это означает involuntary churn-риск.
                     await record_subscription_event(
                         user_id=user_id,
-                        event_type='payment_failed',
+                        event_type="payment_failed",
                         new_plan_id=plan_id,
                         amount_rub=amount,
-                        source='recurring_create_error',
+                        source="recurring_create_error",
                         metadata={
-                            'http_status': resp.status,
-                            'yookassa_response': data,
-                            'days': days,
+                            "http_status": resp.status,
+                            "yookassa_response": data,
+                            "days": days,
                         },
                     )
                     return None
@@ -174,31 +271,28 @@ async def create_recurring_payment(user_id: int, payment_method_id: str,
     except Exception as e:
         logger.error(f"❌ Рекуррентный платёж ошибка: {e}", exc_info=True)
 
-        # Аналитика: исключение при создании рекуррентного платежа.
         await record_subscription_event(
             user_id=user_id,
-            event_type='payment_failed',
+            event_type="payment_failed",
             new_plan_id=plan_id,
             amount_rub=amount,
-            source='recurring_create_exception',
-            metadata={'error': str(e), 'days': days},
+            source="recurring_create_exception",
+            metadata={"error": str(e), "days": days},
         )
         return None
 
 
 async def handle_payment_webhook(payload: dict) -> bool:
     """Обработка webhook от YooKassa."""
-    # АНАЛИТИКА: первым делом сохраняем raw payload, ДО любой обработки.
-    # Если обработка упадёт - данные останутся для разбора.
     webhook_id = await record_yookassa_webhook(payload)
 
     try:
-        event_type = payload.get('event')
-        payment_data = payload.get('object', {})
-        payment_id = payment_data.get('id')
-        status = payment_data.get('status')
-        metadata = payment_data.get('metadata', {})
-        user_id = metadata.get('user_id')
+        event_type = payload.get("event")
+        payment_data = payload.get("object", {})
+        payment_id = payment_data.get("id")
+        status = payment_data.get("status")
+        metadata = payment_data.get("metadata", {})
+        user_id = metadata.get("user_id")
 
         if not payment_id or not user_id:
             logger.warning(f"⚠️ Webhook без payment_id или user_id")
@@ -206,75 +300,82 @@ async def handle_payment_webhook(payload: dict) -> bool:
             return False
 
         user_id = int(user_id)
-        days = int(metadata.get('days', 30))
-        amount = int(metadata.get('amount', PRO_PRICE))
-        plan_id = metadata.get('plan_id') or None
+        days = int(metadata.get("days", 30))
+        amount = int(metadata.get("amount", PRO_PRICE))
+        plan_id = metadata.get("plan_id") or None
 
-        logger.info(f"💳 Webhook: event={event_type}, payment_id={payment_id}, user_id={user_id}, plan_id={plan_id}, {amount}₽/{days}д")
+        logger.info(
+            f"💳 Webhook: event={event_type}, payment_id={payment_id}, "
+            f"user_id={user_id}, plan_id={plan_id}, {amount}₽/{days}д"
+        )
 
         from database import get_db
         db = await get_db()
 
         async with db.pool.acquire() as conn:
-            await conn.execute("""
-                UPDATE payments SET status = $1, updated_at = CURRENT_TIMESTAMP
-                WHERE payment_id = $2
-            """, status, payment_id)
+            await conn.execute(
+                "UPDATE payments SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE payment_id = $2",
+                status, payment_id,
+            )
 
-        if event_type == 'payment.succeeded' and status == 'succeeded':
-            payment_method = payment_data.get('payment_method', {})
+        if event_type == "payment.succeeded" and status == "succeeded":
+            payment_method = payment_data.get("payment_method", {})
             payment_method_id = None
-            if payment_method.get('saved'):
-                payment_method_id = payment_method.get('id')
+            if payment_method.get("saved"):
+                payment_method_id = payment_method.get("id")
 
             async with db.pool.acquire() as conn:
-                await conn.execute("""
-                    UPDATE payments SET payment_method_id = $1, updated_at = CURRENT_TIMESTAMP
-                    WHERE payment_id = $2
-                """, payment_method_id, payment_id)
+                await conn.execute(
+                    "UPDATE payments SET payment_method_id = $1, updated_at = CURRENT_TIMESTAMP WHERE payment_id = $2",
+                    payment_method_id, payment_id,
+                )
 
             from services.subscription_service import activate_pro
             expires_at = await activate_pro(
-                user_id, days=days, amount=amount,
+                user_id,
+                days=days,
+                amount=amount,
                 payment_method_id=payment_method_id,
                 plan_id=plan_id,
                 payment_id=payment_id,
-                source='yookassa_webhook',
+                source="yookassa_webhook",
             )
 
-            plan_label = metadata.get('plan_label', f'{days} дней')
-            logger.info(f"✅ Подписка активирована: user_id={user_id}, plan_id={plan_id}, план={plan_label}, expires={expires_at}")
+            plan_label = metadata.get("plan_label", f"{days} дней")
+            logger.info(
+                f"✅ Подписка активирована: user_id={user_id}, plan_id={plan_id}, "
+                f"план={plan_label}, expires={expires_at}"
+            )
 
             await _notify_user_payment_success(user_id, expires_at, plan_label)
             await mark_webhook_processed(webhook_id)
             return True
 
-        elif event_type == 'payment.canceled' and status == 'canceled':
-            cancellation = payment_data.get('cancellation_details', {})
-            reason = cancellation.get('reason', 'unknown')
+        elif event_type == "payment.canceled" and status == "canceled":
+            cancellation = payment_data.get("cancellation_details", {})
+            reason = cancellation.get("reason", "unknown")
             logger.warning(f"❌ Платёж отменён: user_id={user_id}, reason={reason}")
 
-            if metadata.get('type') == 'recurring':
-                # Аналитика: рекуррентный платёж отменён YooKassa.
-                # Это involuntary churn (карта истекла, нет средств и т.д.).
+            if metadata.get("type") == "recurring":
                 await record_subscription_event(
                     user_id=user_id,
-                    event_type='payment_failed',
+                    event_type="payment_failed",
                     new_plan_id=plan_id,
                     amount_rub=amount,
                     payment_id=payment_id,
-                    source='yookassa_webhook_recurring_canceled',
-                    metadata={'cancellation_reason': reason, 'days': days},
+                    source="yookassa_webhook_recurring_canceled",
+                    metadata={"cancellation_reason": reason, "days": days},
                 )
                 await _notify_user_payment_failed(user_id, reason)
 
             await mark_webhook_processed(webhook_id)
             return True
 
-        elif event_type == 'refund.succeeded':
-            # Аналитика: возврат средств. Сохраняем как событие.
-            refund_amount_obj = payment_data.get('amount', {})
-            refund_amount = refund_amount_obj.get('value') if isinstance(refund_amount_obj, dict) else None
+        elif event_type == "refund.succeeded":
+            refund_amount_obj = payment_data.get("amount", {})
+            refund_amount = (
+                refund_amount_obj.get("value") if isinstance(refund_amount_obj, dict) else None
+            )
             try:
                 refund_amount_rub = int(float(refund_amount)) if refund_amount else None
             except (TypeError, ValueError):
@@ -282,14 +383,16 @@ async def handle_payment_webhook(payload: dict) -> bool:
 
             await record_subscription_event(
                 user_id=user_id,
-                event_type='refunded',
+                event_type="refunded",
                 new_plan_id=plan_id,
                 amount_rub=refund_amount_rub,
                 payment_id=payment_id,
-                source='yookassa_webhook_refund',
-                metadata={'refund_payload': payment_data},
+                source="yookassa_webhook_refund",
+                metadata={"refund_payload": payment_data},
             )
-            logger.info(f"💸 Возврат: user_id={user_id}, payment_id={payment_id}, amount={refund_amount}")
+            logger.info(
+                f"💸 Возврат: user_id={user_id}, payment_id={payment_id}, amount={refund_amount}"
+            )
             await mark_webhook_processed(webhook_id)
             return True
 
@@ -314,16 +417,16 @@ async def process_auto_payments():
     logger.info(f"💳 Найдено {len(expiring)} подписок для автопродления")
 
     for sub in expiring:
-        user_id = sub['user_id']
-        method_id = sub['auto_pay_method_id']
+        user_id = sub["user_id"]
+        method_id = sub["auto_pay_method_id"]
         if not method_id:
             continue
 
         result = await create_recurring_payment(
             user_id, method_id,
-            amount=sub.get('plan_amount', PRO_PRICE),
-            days=sub.get('plan_days', 30),
-            plan_id=sub.get('plan_id'),
+            amount=sub.get("plan_amount", PRO_PRICE),
+            days=sub.get("plan_days", 30),
+            plan_id=sub.get("plan_id"),
         )
 
         if result:
@@ -336,7 +439,7 @@ async def process_auto_payments():
 async def _notify_user_payment_success(user_id: int, expires_at: datetime, plan_label: str = ""):
     try:
         from services.fcm_service import send_push_to_user
-        expires_str = expires_at.strftime('%d.%m.%Y')
+        expires_str = expires_at.strftime("%d.%m.%Y")
         await send_push_to_user(
             user_id=user_id,
             title="🎉 Подписка активирована!",
@@ -364,27 +467,28 @@ async def cancel_auto_payment(user_id: int):
     from database import get_db
     db = await get_db()
 
-    # Получаем текущий plan_id для записи в аналитику
     async with db.pool.acquire() as conn:
-        row = await conn.fetchrow("""
-            SELECT plan_id, expires_at FROM subscriptions WHERE user_id = $1
-        """, user_id)
+        row = await conn.fetchrow(
+            "SELECT plan_id, expires_at FROM subscriptions WHERE user_id = $1",
+            user_id,
+        )
 
-        await conn.execute("""
+        await conn.execute(
+            """
             UPDATE subscriptions
             SET auto_pay_method_id = NULL, updated_at = CURRENT_TIMESTAMP
             WHERE user_id = $1
-        """, user_id)
+            """,
+            user_id,
+        )
 
     logger.info(f"🔕 Автоплатёж отключён для user_id={user_id}")
 
-    # Аналитика: пользователь явно отключил автопродление.
-    # Подписка остаётся активной до expires_at, но дальше не продлится.
     await record_subscription_event(
         user_id=user_id,
-        event_type='auto_pay_disabled',
-        old_plan_id=row['plan_id'] if row else None,
-        new_plan_id=row['plan_id'] if row else None,
-        new_expires_at=row['expires_at'] if row else None,
-        source='user_action',
+        event_type="auto_pay_disabled",
+        old_plan_id=row["plan_id"] if row else None,
+        new_plan_id=row["plan_id"] if row else None,
+        new_expires_at=row["expires_at"] if row else None,
+        source="user_action",
     )
