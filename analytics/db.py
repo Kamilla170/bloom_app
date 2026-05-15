@@ -451,3 +451,28 @@ async def get_top_streak_users() -> list[dict]:
         """,
         cache_key="streak:top_users",
     )
+
+
+# ============================================================
+# ACTIVATION FUNNEL
+# ============================================================
+
+async def get_activation_summary() -> dict:
+    row = await fetchrow(
+        "SELECT * FROM analytics.v_activation_summary",
+        cache_key="activation:summary",
+    )
+    return dict(row) if row else {}
+
+
+async def get_activation_funnel_weekly() -> list[dict]:
+    return await fetch(
+        """
+        SELECT cohort_week, signups, step_plant_added, step_photo_analysis,
+               step_activated, step_ai_question,
+               pct_plant, pct_photo, pct_activated, pct_qa
+        FROM analytics.v_activation_funnel_weekly
+        ORDER BY cohort_week DESC
+        """,
+        cache_key="activation:funnel_weekly",
+    )
