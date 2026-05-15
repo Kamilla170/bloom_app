@@ -104,31 +104,24 @@ async def is_pro(user_id: int) -> bool:
     return plan['plan'] == 'pro'
 
 
-def _format_time_until_reset(reset_date: Optional[datetime]) -> str:
-    """Форматирует время до сброса лимитов: 'Обновление через 5ч 23мин'"""
-    if not reset_date:
-        return ""
-    now = datetime.now()
-    delta = reset_date - now
-    total_seconds = int(delta.total_seconds())
-    if total_seconds <= 0:
-        return ""
-    hours = total_seconds // 3600
-    minutes = (total_seconds % 3600) // 60
-    if hours > 0 and minutes > 0:
-        return f"\n\n⏳ Обновление через {hours}ч {minutes}мин"
-    elif hours > 0:
-        return f"\n\n⏳ Обновление через {hours}ч"
-    elif minutes > 0:
-        return f"\n\n⏳ Обновление через {minutes}мин"
-    else:
-        return "\n\n⏳ Обновление меньше чем через минуту"
-
-
-async def check_limit(user_id: int, action: str) -> Tuple[bool, Optional[str]]:
+async def check_limit(user_id: int, action: str) -> Tuple[bool, Optional[Dict]]:
     """
-    Проверить лимит действия.
+    Проверить лимит действия для мобильного API.
     action: 'plants' | 'analyses' | 'questions'
+
+    Возвращает кортеж (allowed, error_detail).
+
+    error_detail (если allowed=False) - dict вида:
+        {
+            "code": "limit_reached",
+            "limit_type": "plants" | "analyses" | "questions",
+            "message": "Достигнут лимит бесплатного плана: 1 анализ фото в день",
+            "limit": 1,
+            "resets_at": "2025-05-16T00:00:00+03:00"  # ISO, или null для plants
+        }
+
+    Без HTML-разметки. Текст для фронта - короткий, готовый к показу как есть.
+    Используется в FastAPI-роутерах: `raise HTTPException(403, detail=error_detail)`.
     """
     if user_id in ADMIN_USER_IDS:
         return True, None
@@ -138,7 +131,6 @@ async def check_limit(user_id: int, action: str) -> Tuple[bool, Optional[str]]:
 
     db = await get_db()
     usage = await get_or_create_usage(user_id)
-
     limit = FREE_LIMITS.get(action, 0)
 
     if action == 'plants':
@@ -148,33 +140,50 @@ async def check_limit(user_id: int, action: str) -> Tuple[bool, Optional[str]]:
                 user_id
             )
         if count >= limit:
-            return False, (
-                f"🌱 Достигнут лимит бесплатного плана: <b>{limit} растений</b>\n\n"
-                f"Оформите <b>подписку</b> для неограниченного доступа!"
-            )
+            return False, {
+                "code": "limit_reached",
+                "limit_type": "plants",
+                "message": _API_LIMIT_MESSAGES['plants'].format(limit=limit),
+                "limit": limit,
+                # У plants нет сброса по времени, лимит исчерпан до подписки
+                "resets_at": None,
+            }
         return True, None
 
-    elif action == 'analyses':
+    if action == 'analyses':
         if usage['analyses_used'] >= limit:
-            countdown = _format_time_until_reset(usage.get('reset_date'))
-            return False, (
-                f"📸 Достигнут лимит бесплатного плана: <b>{limit} анализ фото</b> в день\n\n"
-                f"Оформите <b>подписку</b> для неограниченного доступа!"
-                f"{countdown}"
-            )
+            reset = usage.get('reset_date')
+            return False, {
+                "code": "limit_reached",
+                "limit_type": "analyses",
+                "message": _API_LIMIT_MESSAGES['analyses'].format(limit=limit),
+                "limit": limit,
+                "resets_at": reset.isoformat() if reset else None,
+            }
         return True, None
 
-    elif action == 'questions':
+    if action == 'questions':
         if usage['questions_used'] >= limit:
-            countdown = _format_time_until_reset(usage.get('reset_date'))
-            return False, (
-                f"🤖 Достигнут лимит бесплатного плана: <b>{limit} вопрос</b> в день\n\n"
-                f"Оформите <b>подписку</b> для неограниченного доступа!"
-                f"{countdown}"
-            )
+            reset = usage.get('reset_date')
+            return False, {
+                "code": "limit_reached",
+                "limit_type": "questions",
+                "message": _API_LIMIT_MESSAGES['questions'].format(limit=limit),
+                "limit": limit,
+                "resets_at": reset.isoformat() if reset else None,
+            }
         return True, None
 
     return True, None
+
+
+# Шаблоны сообщений для мобильного API. Без HTML, без \n.
+# Длинный призыв к подписке юзер увидит уже на экране подписки.
+_API_LIMIT_MESSAGES = {
+    'plants': "Достигнут лимит бесплатного плана: {limit} растение",
+    'analyses': "Достигнут лимит бесплатного плана: {limit} анализ фото в день",
+    'questions': "Достигнут лимит бесплатного плана: {limit} вопрос в день",
+}
 
 
 async def increment_usage(user_id: int, action: str):
