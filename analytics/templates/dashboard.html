@@ -89,6 +89,51 @@
                 MRR: сколько денег приносят подписки в пересчёте на месяц. Годовые подписки делятся на 12. ARR это MRR умножить на 12. ARPU средний чек на одну активную подписку. Gross margin lifetime: вся выручка за всё время минус все AI-расходы. Если красное, ты платишь OpenAI больше, чем получаешь от юзеров.
             </p>
 
+            <!-- Activation Funnel -->
+            <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100 mb-8">
+                <div class="flex items-baseline justify-between mb-1">
+                    <h2 class="text-lg font-semibold">Activation funnel (7 дней от регистрации)</h2>
+                    <div class="text-right">
+                        <div class="text-xs text-slate-500 uppercase tracking-wider">Activation rate</div>
+                        <div class="text-2xl font-bold kpi-value text-emerald-600">{{ fmt_pct(activation_summary.activation_rate_pct) }}</div>
+                        <div class="text-xs text-slate-400">{{ fmt_int(activation_summary.total_activated) }} из {{ fmt_int(activation_summary.total_signups) }} за 8 нед</div>
+                    </div>
+                </div>
+                <p class="hint">
+                    Activation: юзер добавил хотя бы 1 растение И сделал photo_analysis в первые 7 дней. Это твой aha-moment, юзер получил ценность продукта. Норма для consumer-приложений 25-40%, ниже 15% значит онбординг не работает (юзеры регистрируются и не понимают что делать). Если activation rate падает несколько недель подряд, что-то сломалось в onboarding flow.
+                </p>
+                {% if activation_funnel %}
+                <div class="overflow-x-auto mt-3">
+                    <table class="w-full text-sm">
+                        <thead class="text-xs uppercase text-slate-500">
+                            <tr class="border-b">
+                                <th class="text-left py-2">Неделя</th>
+                                <th class="text-right">Signups</th>
+                                <th class="text-right">Plant added</th>
+                                <th class="text-right">Photo analysis</th>
+                                <th class="text-right">Activated</th>
+                                <th class="text-right">AI question</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in activation_funnel %}
+                            <tr class="border-b border-slate-50">
+                                <td class="py-2 font-medium">{{ fmt_date(row.cohort_week) }}</td>
+                                <td class="text-right">{{ fmt_int(row.signups) }}</td>
+                                <td class="text-right">{{ fmt_int(row.step_plant_added) }} <span class="text-xs text-slate-400">({{ fmt_pct(row.pct_plant) }})</span></td>
+                                <td class="text-right">{{ fmt_int(row.step_photo_analysis) }} <span class="text-xs text-slate-400">({{ fmt_pct(row.pct_photo) }})</span></td>
+                                <td class="text-right font-semibold text-emerald-600">{{ fmt_int(row.step_activated) }} <span class="text-xs text-slate-400">({{ fmt_pct(row.pct_activated) }})</span></td>
+                                <td class="text-right">{{ fmt_int(row.step_ai_question) }} <span class="text-xs text-slate-400">({{ fmt_pct(row.pct_qa) }})</span></td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-slate-400 text-sm mt-3">Когортных данных пока нет (нужно минимум 7 дней с регистрации первого юзера).</p>
+                {% endif %}
+            </div>
+
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
                 <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
                     <h2 class="text-lg font-semibold">Выручка по месяцам</h2>
