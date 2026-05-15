@@ -7,8 +7,8 @@ import uuid
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
-from pydantic import BaseModel
-from typing import Optional
+from pydantic import BaseModel, Field
+from typing import Optional, List
 
 from database import get_db
 from api.auth.dependencies import get_current_user
@@ -16,6 +16,7 @@ from api.schemas import (
     PlantListResponse, PlantSummary, PlantDetail,
     AnalysisResponse, SavePlantRequest, WaterPlantResponse,
     UpdatePlantRequest, FertilizeResponse, PlantPhotoEntry, SuccessResponse,
+    AchievementOut,
 )
 from services.ai_service import analyze_plant_image, format_recommendations_text
 from services.plant_service import (
@@ -55,17 +56,29 @@ class ChatPhotoMessageOut(BaseModel):
     plant_name: Optional[str] = None
     photo_url: Optional[str] = None
     message_type: str = "user_photo"
+    newly_unlocked_achievements: List[AchievementOut] = Field(default_factory=list)
 
 
 def _plant_photo_url(photo_file_id: str | None, width: int = 400) -> str | None:
     return get_photo_url(photo_file_id, width)
 
 
-async def _safe_check_achievements(user_id: int, category: str) -> None:
+def _to_achievement_list(raw: list) -> List[AchievementOut]:
+    """Сконвертировать список dict из check_and_unlock в список схем API."""
+    return [AchievementOut.from_dict(a) for a in (raw or [])]
+
+
+async def _safe_check_achievements(user_id: int, category: str) -> list:
+    """
+    Безопасная обёртка для check_and_unlock. Возвращает список новых
+    ачивок (dict), при ошибке отдаёт пустой список.
+    """
     try:
-        await check_and_unlock(user_id, category=category)
+        result = await check_and_unlock(user_id, category=category)
+        return result or []
     except Exception as e:
         logger.warning(f"⚠️ check_and_unlock({category}) упал: {e}", exc_info=True)
+        return []
 
 
 async def _safe_update_global_streak(user_id: int, plant_id: int) -> None:
@@ -262,7 +275,8 @@ async def save_plant(
 
     _app_temp_analyses.pop(req.temp_id, None)
 
-    await _safe_check_achievements(user_id, category='plants')
+    newly_unlocked = await _safe_check_achievements(user_id, category='plants')
+    achievements_out = _to_achievement_list(newly_unlocked)
 
     plant_id = result["plant_id"]
 
@@ -270,7 +284,9 @@ async def save_plant(
         db = await get_db()
         plant = await db.get_plant_with_state(plant_id, user_id)
         if plant:
-            return _plant_to_detail(plant)
+            detail = _plant_to_detail(plant)
+            detail.newly_unlocked_achievements = achievements_out
+            return detail
 
         logger.warning(
             f"⚠️ Растение {plant_id} сохранено, но get_plant_with_state вернул None"
@@ -296,6 +312,7 @@ async def save_plant(
         saved_date=datetime.now(),
         fertilizing_enabled=bool(state_info.get("fertilizing_enabled") or False),
         fertilizing_interval=state_info.get("fertilizing_interval"),
+        newly_unlocked_achievements=achievements_out,
     )
 
 
@@ -308,7 +325,7 @@ async def water_single_plant(plant_id: int, user_id: int = Depends(get_current_u
         raise HTTPException(status_code=404, detail=result.get("error", "Растение не найдено"))
 
     await _safe_update_global_streak(user_id, plant_id)
-    await _safe_check_achievements(user_id, category='water')
+    newly_unlocked = await _safe_check_achievements(user_id, category='water')
 
     return WaterPlantResponse(
         success=True,
@@ -318,6 +335,7 @@ async def water_single_plant(plant_id: int, user_id: int = Depends(get_current_u
         current_streak=result.get("current_streak", 0),
         max_streak=result.get("max_streak", 0),
         watered_at=datetime.now(),
+        newly_unlocked_achievements=_to_achievement_list(newly_unlocked),
     )
 
 
@@ -393,12 +411,12 @@ async def _process_photo_update(
     user_id: int,
     image_bytes: bytes,
     message_type: str,
-) -> tuple[dict, str | None, dict | None]:
+) -> tuple[dict, str | None, dict | None, list]:
     """
     Общий код для /photo и /chat-photo: лимит, анализ, апдейт состояния, plant_photos.
-    Возвращает: (analyze_result, photo_url, update_result).
+    Возвращает: (analyze_result, photo_url, update_result, newly_unlocked).
 
-    Если на фото не растение — возвращает (analyze_result, None, None).
+    Если на фото не растение — возвращает (analyze_result, None, None, []).
     Лимит не списывается, фото в Cloudinary не грузится, карточка растения не трогается.
     Решение что делать дальше принимает вызывающий эндпоинт.
     """
@@ -426,7 +444,7 @@ async def _process_photo_update(
 
     # На фото не растение — выходим до любых сайд-эффектов.
     if not result.get("success") and result.get("error_code") == "not_a_plant":
-        return result, None, None
+        return result, None, None, []
 
     if not result["success"]:
         raise HTTPException(status_code=500, detail=result.get("error", "Ошибка анализа"))
@@ -462,9 +480,9 @@ async def _process_photo_update(
         logger.warning(f"⚠️ Не удалось добавить фото в plant_photos: {e}")
 
     await _safe_increment_photo_count(user_id)
-    await _safe_check_achievements(user_id, category='photos')
+    newly_unlocked = await _safe_check_achievements(user_id, category='photos')
 
-    return result, photo_url, update_result
+    return result, photo_url, update_result, newly_unlocked
 
 
 @router.post("/{plant_id}/photo", response_model=PlantDetail)
@@ -479,7 +497,7 @@ async def update_plant_photo(
     Используется кнопкой 'Обновить фото' в карточке.
     """
     image_bytes = await photo.read()
-    analyze_result, _, _ = await _process_photo_update(
+    analyze_result, _, _, newly_unlocked = await _process_photo_update(
         plant_id=plant_id,
         user_id=user_id,
         image_bytes=image_bytes,
@@ -492,7 +510,9 @@ async def update_plant_photo(
 
     db = await get_db()
     plant = await db.get_plant_with_state(plant_id, user_id)
-    return _plant_to_detail(plant)
+    detail = _plant_to_detail(plant)
+    detail.newly_unlocked_achievements = _to_achievement_list(newly_unlocked)
+    return detail
 
 
 @router.post("/{plant_id}/chat-photo", response_model=ChatPhotoMessageOut)
@@ -507,12 +527,14 @@ async def send_chat_photo(
     но возвращает новое сообщение чата (с фото пользователя и анализом ИИ).
     """
     image_bytes = await photo.read()
-    analyze_result, photo_url, update_result = await _process_photo_update(
+    analyze_result, photo_url, update_result, newly_unlocked = await _process_photo_update(
         plant_id=plant_id,
         user_id=user_id,
         image_bytes=image_bytes,
         message_type="user_photo",
     )
+
+    achievements_out = _to_achievement_list(newly_unlocked)
 
     # На фото не растение — пишем в чат сообщение от ИИ с отказом
     # и возвращаем его. Карточку растения не трогаем, лимит не списан.
@@ -530,7 +552,6 @@ async def send_chat_photo(
         except Exception as e:
             logger.warning(f"⚠️ Не удалось записать сообщение-отказ в чат: {e}")
 
-        # Достаём только что записанное сообщение
         db = await get_db()
         history = await db.get_plant_qa_history(plant_id, limit=1)
         if history:
@@ -545,9 +566,9 @@ async def send_chat_photo(
                 plant_name=None,
                 photo_url=None,
                 message_type="user_photo",
+                newly_unlocked_achievements=achievements_out,
             )
 
-        # Fallback если запись в БД не удалась
         return ChatPhotoMessageOut(
             id=0,
             question="",
@@ -557,6 +578,7 @@ async def send_chat_photo(
             plant_name=None,
             photo_url=None,
             message_type="user_photo",
+            newly_unlocked_achievements=achievements_out,
         )
 
     # Достаём только что записанное сообщение из plant_qa_history
@@ -575,6 +597,7 @@ async def send_chat_photo(
             plant_name=update_result.get("plant_name"),
             photo_url=photo_url,
             message_type="user_photo",
+            newly_unlocked_achievements=achievements_out,
         )
 
     qa = history[0]
@@ -589,6 +612,7 @@ async def send_chat_photo(
         plant_name=update_result.get("plant_name"),
         photo_url=photo_url,
         message_type="user_photo",
+        newly_unlocked_achievements=achievements_out,
     )
 
 
@@ -614,6 +638,9 @@ async def water_all(user_id: int = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail="Ошибка")
 
     await _safe_update_global_streak_bulk(user_id, plant_ids)
-    await _safe_check_achievements(user_id, category='water')
+    newly_unlocked = await _safe_check_achievements(user_id, category='water')
 
-    return SuccessResponse(message="Все растения политы")
+    return SuccessResponse(
+        message="Все растения политы",
+        newly_unlocked_achievements=_to_achievement_list(newly_unlocked),
+    )
