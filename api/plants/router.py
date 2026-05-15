@@ -275,7 +275,16 @@ async def save_plant(
 
     _app_temp_analyses.pop(req.temp_id, None)
 
-    newly_unlocked = await _safe_check_achievements(user_id, category='plants')
+    # Растение всегда сохраняется с главным фото (которое было сделано
+    # на этапе анализа). Поэтому здесь же инкрементим total_photos и
+    # проверяем не только plants, но и photos-ачивки. Без этого первая
+    # фото-ачивка ("Первый кадр") никогда не разблокируется через UX
+    # "новый юзер → анализ → сохранение".
+    await _safe_increment_photo_count(user_id)
+
+    plants_unlocked = await _safe_check_achievements(user_id, category='plants')
+    photos_unlocked = await _safe_check_achievements(user_id, category='photos')
+    newly_unlocked = plants_unlocked + photos_unlocked
     achievements_out = _to_achievement_list(newly_unlocked)
 
     plant_id = result["plant_id"]
