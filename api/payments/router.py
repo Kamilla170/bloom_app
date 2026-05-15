@@ -16,11 +16,17 @@ from api.schemas import (
     DiscountInfo,
     CreatePaymentRequest,
     CreatePaymentResponse,
+    PaymentStatusResponse,
     SuccessResponse,
 )
 from config import SUBSCRIPTION_PLANS, DISCOUNT_PLANS, DISCOUNT_DURATION_DAYS
 from database import get_db
-from services.payment_service import create_payment, handle_payment_webhook, cancel_auto_payment
+from services.payment_service import (
+    create_payment,
+    handle_payment_webhook,
+    cancel_auto_payment,
+    get_payment_status,
+)
 from services.subscription_service import is_pro
 
 logger = logging.getLogger(__name__)
@@ -29,9 +35,6 @@ router = APIRouter(prefix="/payments", tags=["payments"])
 
 
 async def _get_discount_info(user_id: int) -> tuple[bool, Optional[datetime]]:
-    """
-    Возвращает (имеет_скидку, когда_закончится).
-    """
     try:
         db = await get_db()
         async with db.pool.acquire() as conn:
@@ -96,9 +99,14 @@ async def create_new_payment(
     req: CreatePaymentRequest,
     user_id: int = Depends(get_current_user),
 ):
-    """Создать платёж для выбранного тарифа"""
+    """
+    Создать платёж из payment_token, полученного на клиенте через YooKassa SDK.
+    """
     if await is_pro(user_id):
         raise HTTPException(status_code=400, detail="У вас уже есть подписка")
+
+    if not req.payment_token:
+        raise HTTPException(status_code=400, detail="Не передан payment_token")
 
     has_discount, _ = await _get_discount_info(user_id)
     plan = (DISCOUNT_PLANS if has_discount else SUBSCRIPTION_PLANS).get(req.plan_id)
@@ -110,6 +118,7 @@ async def create_new_payment(
 
     result = await create_payment(
         user_id=user_id,
+        payment_token=req.payment_token,
         amount=plan["price"],
         days=plan["days"],
         plan_label=plan["label"],
@@ -126,7 +135,28 @@ async def create_new_payment(
     return CreatePaymentResponse(
         success=True,
         payment_id=result["payment_id"],
-        confirmation_url=result["confirmation_url"],
+        status=result["status"],
+        confirmation_url=result.get("confirmation_url"),
+    )
+
+
+@router.get("/status/{payment_id}", response_model=PaymentStatusResponse)
+async def payment_status(
+    payment_id: str,
+    user_id: int = Depends(get_current_user),
+):
+    """
+    Получить статус платежа. Используется фронтом для поллинга после tokenization.
+    """
+    info = await get_payment_status(payment_id)
+    if not info:
+        raise HTTPException(status_code=404, detail="Платёж не найден")
+
+    return PaymentStatusResponse(
+        payment_id=info["payment_id"],
+        status=info["status"],
+        amount=info["amount"],
+        plan_id=info.get("plan_id"),
     )
 
 
