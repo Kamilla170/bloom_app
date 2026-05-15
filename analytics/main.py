@@ -187,6 +187,10 @@ async def dashboard(request: Request, _: str = Depends(require_auth)):
         streak_summary = await db.get_streak_summary()
         streak_dist = await db.get_streak_distribution()
         top_streak_users = await db.get_top_streak_users()
+
+        # Activation
+        activation_summary = await db.get_activation_summary()
+        activation_funnel = await db.get_activation_funnel_weekly()
     except Exception as e:
         logger.error(f"❌ Ошибка загрузки данных: {e}", exc_info=True)
         return HTMLResponse(
@@ -350,6 +354,9 @@ async def dashboard(request: Request, _: str = Depends(require_auth)):
             "streak_summary": streak_summary,
             "streak_dist_chart": streak_dist_chart,
             "top_streak_users": top_streak_users,
+            # Activation
+            "activation_summary": activation_summary,
+            "activation_funnel": activation_funnel,
             # Хелперы
             "fmt_rub": _format_rub,
             "fmt_int": _format_int,
