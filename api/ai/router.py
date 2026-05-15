@@ -146,9 +146,9 @@ async def ask_question(
     user_id: int = Depends(get_current_user),
 ):
     """Задать вопрос ИИ о растении (или без растения: общий чат)"""
-    allowed, error_msg = await check_limit(user_id, "questions")
+    allowed, error_detail = await check_limit(user_id, "questions")
     if not allowed:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=error_msg)
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=error_detail)
 
     context_text = ""
     plant_name = None
