@@ -57,6 +57,53 @@ class UpdateProfileRequest(BaseModel):
     avatar_preset_id: Optional[str] = Field(None, min_length=1, max_length=32)
 
 
+# === ACHIEVEMENTS (компактное представление для тостов и для unseen) ===
+
+class AchievementOut(BaseModel):
+    """
+    Лёгкое представление разблокированной ачивки для тостов и для unseen.
+    Намеренно без полей target / order / is_unlocked / current_value:
+    фронт берёт их с экрана Аналитики через AnalyticsResponse,
+    а здесь они не нужны.
+    """
+    code: str
+    title: str
+    category: str
+    icon: str
+    description: str
+    unlocked_at: Optional[datetime] = None
+
+    @classmethod
+    def from_dict(cls, ach: dict) -> "AchievementOut":
+        """
+        Сконвертировать dict из ACHIEVEMENTS / check_and_unlock в схему API.
+        Поддерживает как сырой dict справочника (description_unlocked),
+        так и dict из get_analytics_data (description).
+        """
+        description = ach.get('description') or ach.get('description_unlocked', '')
+        return cls(
+            code=ach['code'],
+            title=ach['title'],
+            category=ach['category'],
+            icon=ach['icon'],
+            description=description,
+            unlocked_at=ach.get('unlocked_at'),
+        )
+
+
+class UnseenAchievementsResponse(BaseModel):
+    count: int
+    achievements: List[AchievementOut] = Field(default_factory=list)
+
+
+class MarkSeenRequest(BaseModel):
+    """
+    Если codes пустой/не передан, маркаются все unseen достижения юзера.
+    Иначе только указанные.
+    """
+    codes: Optional[List[str]] = None
+
+
 # === PLANTS ===
 
 class PlantSummary(BaseModel):
@@ -103,6 +150,9 @@ class PlantDetail(BaseModel):
     fertilizing_interval: Optional[int] = None
     last_fertilized: Optional[datetime] = None
     next_fertilizing_date: Optional[date] = None
+    # Заполняется только в action-эндпоинтах (save plant, photo update).
+    # В GET /plants/{id} всегда пусто.
+    newly_unlocked_achievements: List[AchievementOut] = Field(default_factory=list)
 
 
 class PlantListResponse(BaseModel):
@@ -140,6 +190,7 @@ class WaterPlantResponse(BaseModel):
     current_streak: int = 0
     max_streak: int = 0
     watered_at: Optional[datetime] = None
+    newly_unlocked_achievements: List[AchievementOut] = Field(default_factory=list)
 
 
 class FertilizeResponse(BaseModel):
@@ -240,6 +291,9 @@ class RegisterDeviceRequest(BaseModel):
 class SuccessResponse(BaseModel):
     success: bool = True
     message: str = ""
+    # Используется в /plants/water-all и любых других action-эндпоинтах,
+    # где могут разблокироваться достижения. По умолчанию пусто.
+    newly_unlocked_achievements: List[AchievementOut] = Field(default_factory=list)
 
 
 class ErrorResponse(BaseModel):
