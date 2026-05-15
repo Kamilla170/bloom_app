@@ -5,7 +5,7 @@
 from datetime import datetime
 from config import MOSCOW_TZ, logger
 
-# Таргеты водных ачивок — используются и для разблокировки,
+# Таргеты водных ачивок, используются и для разблокировки,
 # и для прогресса карточки "Серия полива" в аналитике.
 WATER_ACHIEVEMENT_TARGETS = [1, 10, 30, 60, 100]
 
@@ -164,8 +164,16 @@ def _current_value_for(achievement: dict, stats: dict) -> int:
 # Проверка и разблокировка
 # =============================================
 
-async def check_and_unlock(user_id: int, category: str = None) -> list:
-    """Проверить и разблокировать достижения. Возвращает список новых."""
+async def check_and_unlock(user_id: int, category: str = None) -> list[dict]:
+    """
+    Проверить и разблокировать достижения. Возвращает список новых.
+
+    В каждом dict помимо стандартных полей справочника (code, title, category,
+    target, icon, order, description_*) добавлен 'unlocked_at' (datetime),
+    взятый прямо из RETURNING. Это нужно для тостов и для GET /achievements/unseen.
+
+    Глобальный справочник ACHIEVEMENTS не мутируется: возвращаются копии.
+    """
     from database import get_db
 
     stats = await _get_user_stats(user_id)
@@ -188,11 +196,22 @@ async def check_and_unlock(user_id: int, category: str = None) -> list:
                 continue
             if _current_value_for(ach, stats) >= ach['target']:
                 async with db.pool.acquire() as conn:
-                    await conn.execute("""
+                    unlocked_at = await conn.fetchval("""
                         INSERT INTO user_achievements (user_id, achievement_code, unlocked_at)
-                        VALUES ($1, $2, NOW()) ON CONFLICT DO NOTHING
+                        VALUES ($1, $2, NOW())
+                        ON CONFLICT DO NOTHING
+                        RETURNING unlocked_at
                     """, user_id, ach['code'])
-                newly_unlocked.append(ach)
+
+                # На случай race condition с ON CONFLICT: insert не выполнился,
+                # значит ачивку уже добавил параллельный запрос. Пропускаем.
+                if unlocked_at is None:
+                    continue
+
+                # Копия чтобы не мутировать глобальный ACHIEVEMENTS
+                ach_with_time = dict(ach)
+                ach_with_time['unlocked_at'] = unlocked_at
+                newly_unlocked.append(ach_with_time)
                 logger.info(f"🏆 Achievement unlocked: {ach['code']} for user {user_id}")
 
     return newly_unlocked
