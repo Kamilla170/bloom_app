@@ -94,9 +94,9 @@
                             <span class="{% if aarrr.revenue.trend_pct|float > 0 %}text-emerald-600{% elif aarrr.revenue.trend_pct|float < 0 %}text-rose-600{% else %}text-slate-400{% endif %}">
                                 {% if aarrr.revenue.trend_pct|float > 0 %}+{% endif %}{{ '%.1f'|format(aarrr.revenue.trend_pct|float) }}%
                             </span>
-                            <span class="text-slate-400"> new MRR vs пр.мес</span>
+                            <span class="text-slate-400"> vs прошлый месяц</span>
                         {% else %}
-                            <span class="text-slate-400">MRR сейчас</span>
+                            <span class="text-slate-400">Поступления за этот месяц</span>
                         {% endif %}
                     </div>
                     <div class="text-xs text-slate-500 mt-1">{{ status_label[aarrr.revenue.status] }}</div>
@@ -110,7 +110,7 @@
                 </div>
             </div>
             <p class="hint mb-8">
-                AARRR (пиратские метрики): фреймворк для consumer-продукта в начале пути. Пять букв = пять воронок: откуда приходят (Acquisition), доходят ли до ценности (Activation), возвращаются ли (Retention), платят ли (Revenue), приводят ли друзей (Referral). Красная плашка сигнал что эта буква сломана, зелёная норма. Это утренний взгляд на здоровье продукта за 5 секунд. Подробности по каждой букве смотри на других табах.
+                AARRR (пиратские метрики): фреймворк для consumer-продукта в начале пути. Пять букв = пять воронок: откуда приходят (Acquisition), доходят ли до ценности (Activation), возвращаются ли (Retention), платят ли (Revenue, поступления за этот месяц, не путать с MRR ниже), приводят ли друзей (Referral). Красная плашка сигнал что эта буква сломана, зелёная норма. Это утренний взгляд на здоровье продукта за 5 секунд. Подробности по каждой букве смотри на других табах.
             </p>
 
             <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-3">
