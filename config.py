@@ -13,9 +13,11 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")  # Опционально для API
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 PLANTID_API_KEY = os.getenv("PLANTID_API_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # Legacy, для платежей больше не используется
 PORT = int(os.getenv("PORT", 8000))
 
+# YooKassa: shopId и secretKey - для серверных запросов к API.
+# clientApplicationKey хранится на фронте (в Flutter SDK), не здесь.
 YOOKASSA_SHOP_ID = os.getenv("YOOKASSA_SHOP_ID")
 YOOKASSA_SECRET_KEY = os.getenv("YOOKASSA_SECRET_KEY")
 
@@ -71,7 +73,6 @@ LEGACY_STATE_MAPPING = {
     'adaptation': 'needs_care',
 }
 
-# Промпт для анализа растений
 PLANT_IDENTIFICATION_PROMPT = """
 Вы - профессиональный ботаник-диагност с 30-летним опытом идентификации и диагностики комнатных растений.
 
@@ -161,5 +162,4 @@ def validate_config():
     logger.info("✅ Конфигурация валидна")
     logger.info(f"🔑 BOT_TOKEN: {'✅' if BOT_TOKEN else '⏭️ (не нужен для API)'}")
     logger.info(f"🔑 OPENAI_API_KEY: {'✅' if OPENAI_API_KEY else '❌'}")
-    logger.info(f"🌐 WEBHOOK_URL: {WEBHOOK_URL if WEBHOOK_URL else '—'}")
     logger.info(f"💳 YOOKASSA: {'✅' if YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY else '❌'}")
