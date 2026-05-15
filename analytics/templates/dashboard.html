@@ -13,24 +13,24 @@
         .tab-panel { display: none; }
         .tab-panel.active { display: block; }
         .tab-btn { border-bottom: 2px solid transparent; transition: all 0.15s ease; }
-        .tab-btn:hover { color: #0f172a; }
-        .tab-btn.active { border-bottom-color: #10b981; color: #0f172a; font-weight: 600; }
+        .tab-btn:hover { color: #f1f5f9; }
+        .tab-btn.active { border-bottom-color: #10b981; color: #f1f5f9; font-weight: 600; }
         .hint {
-            font-size: 0.78rem; line-height: 1.45; color: #64748b;
+            font-size: 0.78rem; line-height: 1.45; color: #94a3b8;
             margin-top: 0.25rem; margin-bottom: 1rem;
         }
         .matrix-cell { font-feature-settings: 'tnum' on, 'lnum' on; }
         .ret-cell { font-feature-settings: 'tnum' on, 'lnum' on; font-size: 0.75rem; padding: 0.35rem 0.5rem; }
-        .ret-na { color: #cbd5e1; }
+        .ret-na { color: #475569; }
     </style>
 </head>
-<body class="bg-slate-50 text-slate-900">
+<body class="bg-slate-950 text-slate-100">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
         <div class="flex items-center justify-between mb-6">
             <div>
-                <h1 class="text-3xl font-bold text-slate-900">🌱 Bloom AI Analytics</h1>
-                <p class="text-sm text-slate-500 mt-1">Last updated: {{ now }} (cache TTL 60s)</p>
+                <h1 class="text-3xl font-bold text-slate-100">🌱 Bloom AI Analytics</h1>
+                <p class="text-sm text-slate-400 mt-1">Last updated: {{ now }} (cache TTL 60s)</p>
             </div>
             <button onclick="location.reload()"
                     class="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition text-sm font-medium">
@@ -38,75 +38,75 @@
             </button>
         </div>
 
-        <div class="border-b border-slate-200 mb-8">
+        <div class="border-b border-slate-800 mb-8">
             <nav class="flex gap-6 overflow-x-auto -mb-px">
-                <button data-tab="overview" class="tab-btn py-3 px-1 text-sm text-slate-500 whitespace-nowrap active">Обзор</button>
-                <button data-tab="subscriptions" class="tab-btn py-3 px-1 text-sm text-slate-500 whitespace-nowrap">Подписки</button>
-                <button data-tab="unit-economics" class="tab-btn py-3 px-1 text-sm text-slate-500 whitespace-nowrap">Юнит-экономика</button>
-                <button data-tab="cohorts" class="tab-btn py-3 px-1 text-sm text-slate-500 whitespace-nowrap">Когорты</button>
-                <button data-tab="product" class="tab-btn py-3 px-1 text-sm text-slate-500 whitespace-nowrap">Продукт</button>
+                <button data-tab="overview" class="tab-btn py-3 px-1 text-sm text-slate-400 whitespace-nowrap active">Обзор</button>
+                <button data-tab="subscriptions" class="tab-btn py-3 px-1 text-sm text-slate-400 whitespace-nowrap">Подписки</button>
+                <button data-tab="unit-economics" class="tab-btn py-3 px-1 text-sm text-slate-400 whitespace-nowrap">Юнит-экономика</button>
+                <button data-tab="cohorts" class="tab-btn py-3 px-1 text-sm text-slate-400 whitespace-nowrap">Когорты</button>
+                <button data-tab="product" class="tab-btn py-3 px-1 text-sm text-slate-400 whitespace-nowrap">Продукт</button>
             </nav>
         </div>
 
         <!-- TAB: Обзор -->
         <div id="tab-overview" class="tab-panel active">
             <!-- AARRR pirate summary -->
-            {% set status_class = {'great': 'text-emerald-600', 'normal': 'text-slate-900', 'alarm': 'text-rose-600', 'neutral': 'text-slate-400'} %}
+            {% set status_class = {'great': 'text-emerald-400', 'normal': 'text-slate-100', 'alarm': 'text-rose-400', 'neutral': 'text-slate-500'} %}
             {% set status_label = {'great': '✓ отлично', 'normal': '— норма', 'alarm': '✗ тревога', 'neutral': '— нет данных'} %}
-            {% set status_border = {'great': 'border-l-emerald-500', 'normal': 'border-l-slate-300', 'alarm': 'border-l-rose-500', 'neutral': 'border-l-slate-200'} %}
+            {% set status_border = {'great': 'border-l-emerald-500', 'normal': 'border-l-slate-600', 'alarm': 'border-l-rose-500', 'neutral': 'border-l-slate-700'} %}
 
             <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-3">
-                <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-100 border-l-4 {{ status_border[aarrr.acquisition.status] }}">
-                    <div class="text-xs text-slate-500 uppercase tracking-wider">A · Acquisition</div>
+                <div class="bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-800 border-l-4 {{ status_border[aarrr.acquisition.status] }}">
+                    <div class="text-xs text-slate-400 uppercase tracking-wider">A · Acquisition</div>
                     <div class="text-2xl font-bold mt-1 kpi-value {{ status_class[aarrr.acquisition.status] }}">{{ fmt_int(aarrr.acquisition.value) }}</div>
                     <div class="text-xs mt-1">
                         {% if aarrr.acquisition.trend_pct is not none %}
-                            <span class="{% if aarrr.acquisition.trend_pct|float > 0 %}text-emerald-600{% elif aarrr.acquisition.trend_pct|float < 0 %}text-rose-600{% else %}text-slate-400{% endif %}">
+                            <span class="{% if aarrr.acquisition.trend_pct|float > 0 %}text-emerald-400{% elif aarrr.acquisition.trend_pct|float < 0 %}text-rose-400{% else %}text-slate-500{% endif %}">
                                 {% if aarrr.acquisition.trend_pct|float > 0 %}+{% endif %}{{ '%.1f'|format(aarrr.acquisition.trend_pct|float) }}%
                             </span>
-                            <span class="text-slate-400"> за 7д</span>
+                            <span class="text-slate-500"> за 7д</span>
                         {% else %}
-                            <span class="text-slate-400">signups за 7д</span>
+                            <span class="text-slate-500">signups за 7д</span>
                         {% endif %}
                     </div>
-                    <div class="text-xs text-slate-500 mt-1">{{ status_label[aarrr.acquisition.status] }}</div>
+                    <div class="text-xs text-slate-400 mt-1">{{ status_label[aarrr.acquisition.status] }}</div>
                 </div>
 
-                <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-100 border-l-4 {{ status_border[aarrr.activation.status] }}">
-                    <div class="text-xs text-slate-500 uppercase tracking-wider">A · Activation</div>
+                <div class="bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-800 border-l-4 {{ status_border[aarrr.activation.status] }}">
+                    <div class="text-xs text-slate-400 uppercase tracking-wider">A · Activation</div>
                     <div class="text-2xl font-bold mt-1 kpi-value {{ status_class[aarrr.activation.status] }}">{{ fmt_pct(aarrr.activation.value) }}</div>
-                    <div class="text-xs text-slate-400 mt-1">aha за 7 дней</div>
-                    <div class="text-xs text-slate-500 mt-1">{{ status_label[aarrr.activation.status] }}</div>
+                    <div class="text-xs text-slate-500 mt-1">aha за 7 дней</div>
+                    <div class="text-xs text-slate-400 mt-1">{{ status_label[aarrr.activation.status] }}</div>
                 </div>
 
-                <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-100 border-l-4 {{ status_border[aarrr.retention.status] }}">
-                    <div class="text-xs text-slate-500 uppercase tracking-wider">R · Retention</div>
+                <div class="bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-800 border-l-4 {{ status_border[aarrr.retention.status] }}">
+                    <div class="text-xs text-slate-400 uppercase tracking-wider">R · Retention</div>
                     <div class="text-2xl font-bold mt-1 kpi-value {{ status_class[aarrr.retention.status] }}">{{ fmt_pct(aarrr.retention.value) }}</div>
-                    <div class="text-xs text-slate-400 mt-1">D28, посл. когорта</div>
-                    <div class="text-xs text-slate-500 mt-1">{{ status_label[aarrr.retention.status] }}</div>
+                    <div class="text-xs text-slate-500 mt-1">D28, посл. когорта</div>
+                    <div class="text-xs text-slate-400 mt-1">{{ status_label[aarrr.retention.status] }}</div>
                 </div>
 
-                <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-100 border-l-4 {{ status_border[aarrr.revenue.status] }}">
-                    <div class="text-xs text-slate-500 uppercase tracking-wider">R · Revenue</div>
+                <div class="bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-800 border-l-4 {{ status_border[aarrr.revenue.status] }}">
+                    <div class="text-xs text-slate-400 uppercase tracking-wider">R · Revenue</div>
                     <div class="text-2xl font-bold mt-1 kpi-value {{ status_class[aarrr.revenue.status] }}">{{ fmt_rub(aarrr.revenue.current_mrr) }}</div>
                     <div class="text-xs mt-1">
                         {% if aarrr.revenue.trend_pct is not none %}
-                            <span class="{% if aarrr.revenue.trend_pct|float > 0 %}text-emerald-600{% elif aarrr.revenue.trend_pct|float < 0 %}text-rose-600{% else %}text-slate-400{% endif %}">
+                            <span class="{% if aarrr.revenue.trend_pct|float > 0 %}text-emerald-400{% elif aarrr.revenue.trend_pct|float < 0 %}text-rose-400{% else %}text-slate-500{% endif %}">
                                 {% if aarrr.revenue.trend_pct|float > 0 %}+{% endif %}{{ '%.1f'|format(aarrr.revenue.trend_pct|float) }}%
                             </span>
-                            <span class="text-slate-400"> vs прошлый месяц</span>
+                            <span class="text-slate-500"> vs прошлый месяц</span>
                         {% else %}
-                            <span class="text-slate-400">Поступления за этот месяц</span>
+                            <span class="text-slate-500">Поступления за этот месяц</span>
                         {% endif %}
                     </div>
-                    <div class="text-xs text-slate-500 mt-1">{{ status_label[aarrr.revenue.status] }}</div>
+                    <div class="text-xs text-slate-400 mt-1">{{ status_label[aarrr.revenue.status] }}</div>
                 </div>
 
-                <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-100 border-l-4 {{ status_border[aarrr.referral.status] }}">
-                    <div class="text-xs text-slate-500 uppercase tracking-wider">R · Referral</div>
-                    <div class="text-2xl font-bold mt-1 kpi-value text-slate-300">—</div>
-                    <div class="text-xs text-slate-400 mt-1">не настроено</div>
-                    <div class="text-xs text-slate-500 mt-1">нужна рефералка</div>
+                <div class="bg-slate-900 rounded-xl p-4 shadow-sm border border-slate-800 border-l-4 {{ status_border[aarrr.referral.status] }}">
+                    <div class="text-xs text-slate-400 uppercase tracking-wider">R · Referral</div>
+                    <div class="text-2xl font-bold mt-1 kpi-value text-slate-700">—</div>
+                    <div class="text-xs text-slate-500 mt-1">не настроено</div>
+                    <div class="text-xs text-slate-400 mt-1">нужна рефералка</div>
                 </div>
             </div>
             <p class="hint mb-8">
@@ -114,38 +114,38 @@
             </p>
 
             <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-3">
-                <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
-                    <div class="text-xs text-slate-500 uppercase tracking-wider">MRR</div>
+                <div class="bg-slate-900 rounded-xl p-5 shadow-sm border border-slate-800">
+                    <div class="text-xs text-slate-400 uppercase tracking-wider">MRR</div>
                     <div class="text-2xl font-bold mt-2 kpi-value">{{ fmt_rub(kpi.mrr_rub) }}</div>
-                    <div class="text-xs text-slate-400 mt-1">ARR: {{ fmt_rub(kpi.arr_rub) }}</div>
+                    <div class="text-xs text-slate-500 mt-1">ARR: {{ fmt_rub(kpi.arr_rub) }}</div>
                 </div>
-                <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
-                    <div class="text-xs text-slate-500 uppercase tracking-wider">Активных подписок</div>
+                <div class="bg-slate-900 rounded-xl p-5 shadow-sm border border-slate-800">
+                    <div class="text-xs text-slate-400 uppercase tracking-wider">Активных подписок</div>
                     <div class="text-2xl font-bold mt-2 kpi-value">{{ fmt_int(kpi.active_subscriptions) }}</div>
-                    <div class="text-xs text-slate-400 mt-1">ARPU: {{ fmt_rub(kpi.arpu_rub) }}</div>
+                    <div class="text-xs text-slate-500 mt-1">ARPU: {{ fmt_rub(kpi.arpu_rub) }}</div>
                 </div>
-                <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
-                    <div class="text-xs text-slate-500 uppercase tracking-wider">Всего юзеров</div>
+                <div class="bg-slate-900 rounded-xl p-5 shadow-sm border border-slate-800">
+                    <div class="text-xs text-slate-400 uppercase tracking-wider">Всего юзеров</div>
                     <div class="text-2xl font-bold mt-2 kpi-value">{{ fmt_int(kpi.total_users) }}</div>
-                    <div class="text-xs text-slate-400 mt-1">Платящих сейчас: {{ fmt_int(overall.currently_paying) }}</div>
+                    <div class="text-xs text-slate-500 mt-1">Платящих сейчас: {{ fmt_int(overall.currently_paying) }}</div>
                 </div>
-                <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
-                    <div class="text-xs text-slate-500 uppercase tracking-wider">MAU</div>
+                <div class="bg-slate-900 rounded-xl p-5 shadow-sm border border-slate-800">
+                    <div class="text-xs text-slate-400 uppercase tracking-wider">MAU</div>
                     <div class="text-2xl font-bold mt-2 kpi-value">{{ fmt_int(kpi.mau) }}</div>
-                    <div class="text-xs text-slate-400 mt-1">за 30 дней</div>
+                    <div class="text-xs text-slate-500 mt-1">за 30 дней</div>
                 </div>
-                <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
-                    <div class="text-xs text-slate-500 uppercase tracking-wider">AI cost (этот мес)</div>
+                <div class="bg-slate-900 rounded-xl p-5 shadow-sm border border-slate-800">
+                    <div class="text-xs text-slate-400 uppercase tracking-wider">AI cost (этот мес)</div>
                     <div class="text-2xl font-bold mt-2 kpi-value">{{ fmt_rub(kpi.ai_cost_rub_month) }}</div>
-                    <div class="text-xs text-slate-400 mt-1">{{ fmt_int(kpi.ai_requests_month) }} запросов</div>
+                    <div class="text-xs text-slate-500 mt-1">{{ fmt_int(kpi.ai_requests_month) }} запросов</div>
                 </div>
-                <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
-                    <div class="text-xs text-slate-500 uppercase tracking-wider">Gross margin (lifetime)</div>
+                <div class="bg-slate-900 rounded-xl p-5 shadow-sm border border-slate-800">
+                    <div class="text-xs text-slate-400 uppercase tracking-wider">Gross margin (lifetime)</div>
                     <div class="text-2xl font-bold mt-2 kpi-value
-                        {% if overall.total_gross_margin_rub|float < 0 %}text-rose-600{% else %}text-emerald-600{% endif %}">
+                        {% if overall.total_gross_margin_rub|float < 0 %}text-rose-400{% else %}text-emerald-400{% endif %}">
                         {{ fmt_rub(overall.total_gross_margin_rub) }}
                     </div>
-                    <div class="text-xs text-slate-400 mt-1">Revenue минус AI</div>
+                    <div class="text-xs text-slate-500 mt-1">Revenue минус AI</div>
                 </div>
             </div>
             <p class="hint mb-8">
@@ -153,13 +153,13 @@
             </p>
 
             <!-- Activation Funnel -->
-            <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100 mb-8">
+            <div class="bg-slate-900 rounded-xl p-6 shadow-sm border border-slate-800 mb-8">
                 <div class="flex items-baseline justify-between mb-1">
                     <h2 class="text-lg font-semibold">Activation funnel (7 дней от регистрации)</h2>
                     <div class="text-right">
-                        <div class="text-xs text-slate-500 uppercase tracking-wider">Activation rate</div>
-                        <div class="text-2xl font-bold kpi-value text-emerald-600">{{ fmt_pct(activation_summary.activation_rate_pct) }}</div>
-                        <div class="text-xs text-slate-400">{{ fmt_int(activation_summary.total_activated) }} из {{ fmt_int(activation_summary.total_signups) }} за 8 нед</div>
+                        <div class="text-xs text-slate-400 uppercase tracking-wider">Activation rate</div>
+                        <div class="text-2xl font-bold kpi-value text-emerald-400">{{ fmt_pct(activation_summary.activation_rate_pct) }}</div>
+                        <div class="text-xs text-slate-500">{{ fmt_int(activation_summary.total_activated) }} из {{ fmt_int(activation_summary.total_signups) }} за 8 нед</div>
                     </div>
                 </div>
                 <p class="hint">
@@ -168,7 +168,7 @@
                 {% if activation_funnel %}
                 <div class="overflow-x-auto mt-3">
                     <table class="w-full text-sm">
-                        <thead class="text-xs uppercase text-slate-500">
+                        <thead class="text-xs uppercase text-slate-400">
                             <tr class="border-b">
                                 <th class="text-left py-2">Неделя</th>
                                 <th class="text-right">Signups</th>
@@ -180,30 +180,30 @@
                         </thead>
                         <tbody>
                             {% for row in activation_funnel %}
-                            <tr class="border-b border-slate-50">
+                            <tr class="border-b border-slate-800">
                                 <td class="py-2 font-medium">{{ fmt_date(row.cohort_week) }}</td>
                                 <td class="text-right">{{ fmt_int(row.signups) }}</td>
-                                <td class="text-right">{{ fmt_int(row.step_plant_added) }} <span class="text-xs text-slate-400">({{ fmt_pct(row.pct_plant) }})</span></td>
-                                <td class="text-right">{{ fmt_int(row.step_photo_analysis) }} <span class="text-xs text-slate-400">({{ fmt_pct(row.pct_photo) }})</span></td>
-                                <td class="text-right font-semibold text-emerald-600">{{ fmt_int(row.step_activated) }} <span class="text-xs text-slate-400">({{ fmt_pct(row.pct_activated) }})</span></td>
-                                <td class="text-right">{{ fmt_int(row.step_ai_question) }} <span class="text-xs text-slate-400">({{ fmt_pct(row.pct_qa) }})</span></td>
+                                <td class="text-right">{{ fmt_int(row.step_plant_added) }} <span class="text-xs text-slate-500">({{ fmt_pct(row.pct_plant) }})</span></td>
+                                <td class="text-right">{{ fmt_int(row.step_photo_analysis) }} <span class="text-xs text-slate-500">({{ fmt_pct(row.pct_photo) }})</span></td>
+                                <td class="text-right font-semibold text-emerald-400">{{ fmt_int(row.step_activated) }} <span class="text-xs text-slate-500">({{ fmt_pct(row.pct_activated) }})</span></td>
+                                <td class="text-right">{{ fmt_int(row.step_ai_question) }} <span class="text-xs text-slate-500">({{ fmt_pct(row.pct_qa) }})</span></td>
                             </tr>
                             {% endfor %}
                         </tbody>
                     </table>
                 </div>
                 {% else %}
-                <p class="text-slate-400 text-sm mt-3">Когортных данных пока нет (нужно минимум 7 дней с регистрации первого юзера).</p>
+                <p class="text-slate-500 text-sm mt-3">Когортных данных пока нет (нужно минимум 7 дней с регистрации первого юзера).</p>
                 {% endif %}
             </div>
 
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-                <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+                <div class="bg-slate-900 rounded-xl p-6 shadow-sm border border-slate-800">
                     <h2 class="text-lg font-semibold">Выручка по месяцам</h2>
                     <p class="hint">Recurring это автопродления (легко предсказать), New это первые покупки (ловишь маркетингом). Чем больше Recurring, тем стабильнее бизнес.</p>
                     <div class="chart-container"><canvas id="revenueChart"></canvas></div>
                 </div>
-                <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+                <div class="bg-slate-900 rounded-xl p-6 shadow-sm border border-slate-800">
                     <h2 class="text-lg font-semibold">AI cost vs Revenue (₽)</h2>
                     <p class="hint">Хорошо: зелёная сильно выше красной. Тревога: линии сблизились или красная выше. Если красная выше, ты буквально доплачиваешь юзерам.</p>
                     <div class="chart-container"><canvas id="costRevenueChart"></canvas></div>
@@ -211,12 +211,12 @@
             </div>
 
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-                <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+                <div class="bg-slate-900 rounded-xl p-6 shadow-sm border border-slate-800">
                     <h2 class="text-lg font-semibold">Подписки по тарифам</h2>
                     <p class="hint">Если 90% сидят на 1-месячном, годовая когорта так и не приживается, надо подумать про скидку или ценность годовой.</p>
                     {% if subs_by_plan %}
                     <table class="w-full text-sm">
-                        <thead class="text-xs uppercase text-slate-500">
+                        <thead class="text-xs uppercase text-slate-400">
                             <tr class="border-b">
                                 <th class="text-left py-2">Тариф</th>
                                 <th class="text-right">Активных</th>
@@ -227,7 +227,7 @@
                         </thead>
                         <tbody>
                             {% for row in subs_by_plan %}
-                            <tr class="border-b border-slate-50">
+                            <tr class="border-b border-slate-800">
                                 <td class="py-2 font-medium">{{ row.plan_label or row.plan_id }}</td>
                                 <td class="text-right">{{ fmt_int(row.active_count) }}</td>
                                 <td class="text-right">{{ fmt_rub(row.mrr_rub) }}</td>
@@ -238,15 +238,15 @@
                         </tbody>
                     </table>
                     {% else %}
-                    <p class="text-slate-400 text-sm">Активных подписок пока нет.</p>
+                    <p class="text-slate-500 text-sm">Активных подписок пока нет.</p>
                     {% endif %}
                 </div>
-                <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+                <div class="bg-slate-900 rounded-xl p-6 shadow-sm border border-slate-800">
                     <h2 class="text-lg font-semibold">AI расходы по типам (30 дней)</h2>
                     <p class="hint">На что уходит бюджет OpenAI. photo_analysis обычно дороже всего. Если какой-то тип съедает 80%, оптимизация именно его даст максимум выгоды.</p>
                     {% if ai_breakdown %}
                     <table class="w-full text-sm">
-                        <thead class="text-xs uppercase text-slate-500">
+                        <thead class="text-xs uppercase text-slate-400">
                             <tr class="border-b">
                                 <th class="text-left py-2">Тип</th>
                                 <th class="text-right">Запросов</th>
@@ -257,7 +257,7 @@
                         </thead>
                         <tbody>
                             {% for row in ai_breakdown %}
-                            <tr class="border-b border-slate-50">
+                            <tr class="border-b border-slate-800">
                                 <td class="py-2 font-medium">{{ row.request_type }}</td>
                                 <td class="text-right">{{ fmt_int(row.requests) }}</td>
                                 <td class="text-right">{{ fmt_int(row.unique_users) }}</td>
@@ -268,24 +268,24 @@
                         </tbody>
                     </table>
                     {% else %}
-                    <p class="text-slate-400 text-sm">Запросов к AI пока не было.</p>
+                    <p class="text-slate-500 text-sm">Запросов к AI пока не было.</p>
                     {% endif %}
                 </div>
             </div>
 
-            <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100 mb-8">
+            <div class="bg-slate-900 rounded-xl p-6 shadow-sm border border-slate-800 mb-8">
                 <h2 class="text-lg font-semibold">DAU / WAU / MAU (90 дней)</h2>
                 <p class="hint">Здоровый продукт: DAU/MAU 20%+ (юзеры заходят 6+ раз в месяц). Низкое DAU/MAU значит регистрируются и забывают.</p>
                 <div class="chart-container" style="height: 360px;"><canvas id="dauMauChart"></canvas></div>
             </div>
 
-            <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100 mb-8">
+            <div class="bg-slate-900 rounded-xl p-6 shadow-sm border border-slate-800 mb-8">
                 <h2 class="text-lg font-semibold">Top 10 пользователей по AI расходам</h2>
                 <p class="hint">Норма: heavy users есть среди платящих. Аномалия: топ забит free-юзерами с отрицательной margin, тогда подкрути лимиты бесплатки.</p>
                 {% if heavy_users %}
                 <div class="overflow-x-auto">
                     <table class="w-full text-sm">
-                        <thead class="text-xs uppercase text-slate-500">
+                        <thead class="text-xs uppercase text-slate-400">
                             <tr class="border-b">
                                 <th class="text-left py-2">User ID</th>
                                 <th class="text-left">Регистрация</th>
@@ -298,21 +298,21 @@
                         </thead>
                         <tbody>
                             {% for u in heavy_users %}
-                            <tr class="border-b border-slate-50">
+                            <tr class="border-b border-slate-800">
                                 <td class="py-2 font-mono text-xs">{{ u.user_id }}</td>
-                                <td class="text-slate-500">{{ fmt_date(u.user_created_at) }}</td>
+                                <td class="text-slate-400">{{ fmt_date(u.user_created_at) }}</td>
                                 <td class="text-right">{{ fmt_rub(u.lifetime_revenue_rub) }}</td>
                                 <td class="text-right">{{ fmt_rub(u.lifetime_ai_cost_rub) }}</td>
                                 <td class="text-right">{{ fmt_int(u.lifetime_ai_requests) }}</td>
                                 <td class="text-right
-                                    {% if u.gross_margin_rub|float < 0 %}text-rose-600{% else %}text-emerald-600{% endif %}">
+                                    {% if u.gross_margin_rub|float < 0 %}text-rose-400{% else %}text-emerald-400{% endif %}">
                                     {{ fmt_rub(u.gross_margin_rub) }}
                                 </td>
                                 <td>
                                     {% if u.is_currently_paying %}
-                                        <span class="inline-block px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs">{{ u.current_plan_id or 'pro' }}</span>
+                                        <span class="inline-block px-2 py-0.5 rounded-full bg-emerald-900/40 text-emerald-300 text-xs">{{ u.current_plan_id or 'pro' }}</span>
                                     {% else %}
-                                        <span class="text-slate-400 text-xs">free</span>
+                                        <span class="text-slate-500 text-xs">free</span>
                                     {% endif %}
                                 </td>
                             </tr>
@@ -321,16 +321,16 @@
                     </table>
                 </div>
                 {% else %}
-                <p class="text-slate-400 text-sm">AI запросов пока не было.</p>
+                <p class="text-slate-500 text-sm">AI запросов пока не было.</p>
                 {% endif %}
             </div>
 
-            <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100 mb-8">
+            <div class="bg-slate-900 rounded-xl p-6 shadow-sm border border-slate-800 mb-8">
                 <h2 class="text-lg font-semibold">Воронка signup в paid (по неделям)</h2>
                 <p class="hint">Для consumer-приложений: 1-2% норм, 3%+ хорошо, 5%+ отлично. Если 0% последние 4 недели, что-то сломалось.</p>
                 {% if signup_funnel %}
                 <table class="w-full text-sm">
-                    <thead class="text-xs uppercase text-slate-500">
+                    <thead class="text-xs uppercase text-slate-400">
                         <tr class="border-b">
                             <th class="text-left py-2">Неделя</th>
                             <th class="text-right">Регистраций</th>
@@ -341,7 +341,7 @@
                     </thead>
                     <tbody>
                         {% for row in signup_funnel %}
-                        <tr class="border-b border-slate-50">
+                        <tr class="border-b border-slate-800">
                             <td class="py-2 font-medium">{{ fmt_date(row.signup_week) }}</td>
                             <td class="text-right">{{ fmt_int(row.signups) }}</td>
                             <td class="text-right">{{ fmt_int(row.converted_to_paid) }}</td>
@@ -352,7 +352,7 @@
                     </tbody>
                 </table>
                 {% else %}
-                <p class="text-slate-400 text-sm">Регистраций пока нет.</p>
+                <p class="text-slate-500 text-sm">Регистраций пока нет.</p>
                 {% endif %}
             </div>
         </div>
@@ -360,28 +360,28 @@
         <!-- TAB: Подписки -->
         <div id="tab-subscriptions" class="tab-panel">
             <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-3">
-                <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
-                    <div class="text-xs text-slate-500 uppercase tracking-wider">Всего ушло</div>
+                <div class="bg-slate-900 rounded-xl p-5 shadow-sm border border-slate-800">
+                    <div class="text-xs text-slate-400 uppercase tracking-wider">Всего ушло</div>
                     <div class="text-2xl font-bold mt-2 kpi-value">{{ fmt_int(churn_summary.total_churned) }}</div>
-                    <div class="text-xs text-slate-400 mt-1">за 30д: {{ fmt_int(churn_summary.churned_30d) }}</div>
+                    <div class="text-xs text-slate-500 mt-1">за 30д: {{ fmt_int(churn_summary.churned_30d) }}</div>
                 </div>
-                <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
-                    <div class="text-xs text-slate-500 uppercase tracking-wider">Involuntary churn</div>
+                <div class="bg-slate-900 rounded-xl p-5 shadow-sm border border-slate-800">
+                    <div class="text-xs text-slate-400 uppercase tracking-wider">Involuntary churn</div>
                     <div class="text-2xl font-bold mt-2 kpi-value
-                        {% if churn_summary.involuntary_pct and churn_summary.involuntary_pct|float > 20 %}text-rose-600{% else %}text-slate-900{% endif %}">
+                        {% if churn_summary.involuntary_pct and churn_summary.involuntary_pct|float > 20 %}text-rose-400{% else %}text-slate-100{% endif %}">
                         {{ fmt_pct(churn_summary.involuntary_pct) }}
                     </div>
-                    <div class="text-xs text-slate-400 mt-1">{{ fmt_int(churn_summary.involuntary) }} из {{ fmt_int(churn_summary.total_churned) }}</div>
+                    <div class="text-xs text-slate-500 mt-1">{{ fmt_int(churn_summary.involuntary) }} из {{ fmt_int(churn_summary.total_churned) }}</div>
                 </div>
-                <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
-                    <div class="text-xs text-slate-500 uppercase tracking-wider">Median days-to-churn</div>
+                <div class="bg-slate-900 rounded-xl p-5 shadow-sm border border-slate-800">
+                    <div class="text-xs text-slate-400 uppercase tracking-wider">Median days-to-churn</div>
                     <div class="text-2xl font-bold mt-2 kpi-value">{{ fmt_int(churn_summary.median_days_to_churn) }}</div>
-                    <div class="text-xs text-slate-400 mt-1">avg: {{ fmt_int(churn_summary.avg_days_to_churn) }} дней</div>
+                    <div class="text-xs text-slate-500 mt-1">avg: {{ fmt_int(churn_summary.avg_days_to_churn) }} дней</div>
                 </div>
-                <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
-                    <div class="text-xs text-slate-500 uppercase tracking-wider">Reactivation 30d</div>
-                    <div class="text-2xl font-bold mt-2 kpi-value text-emerald-600">{{ fmt_pct(reactivation.rate_30d_pct) }}</div>
-                    <div class="text-xs text-slate-400 mt-1">{{ fmt_int(reactivation.reactivated_30d) }} из {{ fmt_int(reactivation.total_churn_events) }}</div>
+                <div class="bg-slate-900 rounded-xl p-5 shadow-sm border border-slate-800">
+                    <div class="text-xs text-slate-400 uppercase tracking-wider">Reactivation 30d</div>
+                    <div class="text-2xl font-bold mt-2 kpi-value text-emerald-400">{{ fmt_pct(reactivation.rate_30d_pct) }}</div>
+                    <div class="text-xs text-slate-500 mt-1">{{ fmt_int(reactivation.reactivated_30d) }} из {{ fmt_int(reactivation.total_churn_events) }}</div>
                 </div>
             </div>
             <p class="hint mb-8">
@@ -389,12 +389,12 @@
             </p>
 
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-                <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+                <div class="bg-slate-900 rounded-xl p-6 shadow-sm border border-slate-800">
                     <h2 class="text-lg font-semibold">Churn по месяцам</h2>
                     <p class="hint">Voluntary (оранжевый): юзер сам отключил. Involuntary (красный): карта не списалась, лечится технически. Если красная полоска большая, проблема в платёжной механике.</p>
                     <div class="chart-container"><canvas id="churnChart"></canvas></div>
                 </div>
-                <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+                <div class="bg-slate-900 rounded-xl p-6 shadow-sm border border-slate-800">
                     <h2 class="text-lg font-semibold">Net MRR Movement</h2>
                     <p class="hint">Зелёный New: новые подписки. Синий Expansion: апгрейды. Оранжевый Contraction: даунгрейды. Красный Churn: потери. Если зелёный плюс синий больше красного плюс оранжевого, MRR растёт.</p>
                     <div class="chart-container"><canvas id="mrrMovementChart"></canvas></div>
@@ -402,12 +402,12 @@
             </div>
 
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-                <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+                <div class="bg-slate-900 rounded-xl p-6 shadow-sm border border-slate-800">
                     <h2 class="text-lg font-semibold">Quick Ratio по месяцам</h2>
                     <p class="hint">(Новые плюс апгрейды) делить на (потери плюс даунгрейды). Меньше 1 бизнес съёживается, 1-2 жжём дрова, 2-4 нормальный SaaS, больше 4 ракета.</p>
                     <div class="chart-container"><canvas id="quickRatioChart"></canvas></div>
                 </div>
-                <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+                <div class="bg-slate-900 rounded-xl p-6 shadow-sm border border-slate-800">
                     <h2 class="text-lg font-semibold">Распределение дней до churn</h2>
                     <p class="hint">Большой столбик в "0-7 дней" значит юзеры не доходят до aha-момента (плохой onboarding). Если в "90+", уходят с возрастом, естественно.</p>
                     <div class="chart-container"><canvas id="daysToChurnChart"></canvas></div>
@@ -415,11 +415,11 @@
             </div>
 
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-                <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+                <div class="bg-slate-900 rounded-xl p-6 shadow-sm border border-slate-800">
                     <h2 class="text-lg font-semibold">Переходы между тарифами</h2>
                     <p class="hint">Строки откуда, колонки куда. Зелёные числа выше диагонали это апгрейды, хорошо. Ниже диагонали даунгрейды, плохо.</p>
                     <table class="w-full text-sm matrix-cell mt-3">
-                        <thead class="text-xs uppercase text-slate-500">
+                        <thead class="text-xs uppercase text-slate-400">
                             <tr class="border-b">
                                 <th class="text-left py-2 pr-3">Из / В</th>
                                 {% for col in plan_switching_matrix.cols %}
@@ -429,10 +429,10 @@
                         </thead>
                         <tbody>
                             {% for i in range(plan_switching_matrix.rows|length) %}
-                            <tr class="border-b border-slate-50">
+                            <tr class="border-b border-slate-800">
                                 <td class="py-2 pr-3 font-medium">{{ plan_switching_matrix.rows[i] }}</td>
                                 {% for j in range(plan_switching_matrix.cols|length) %}
-                                <td class="text-right px-2 {% if i == j %}text-slate-300{% elif plan_switching_matrix.matrix[i][j] > 0 %}text-emerald-600 font-semibold{% else %}text-slate-300{% endif %}">
+                                <td class="text-right px-2 {% if i == j %}text-slate-700{% elif plan_switching_matrix.matrix[i][j] > 0 %}text-emerald-400 font-semibold{% else %}text-slate-700{% endif %}">
                                     {% if i == j %}-{% else %}{{ plan_switching_matrix.matrix[i][j] }}{% endif %}
                                 </td>
                                 {% endfor %}
@@ -441,11 +441,11 @@
                         </tbody>
                     </table>
                 </div>
-                <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+                <div class="bg-slate-900 rounded-xl p-6 shadow-sm border border-slate-800">
                     <h2 class="text-lg font-semibold">Reactivation: возвращение после churn</h2>
                     <p class="hint">Учитываются churn-события старше 30 дней. 30d норма 5-10%, 90d норма 10-20%. Если 0%, винбэк-механики не работают или их нет.</p>
                     <table class="w-full text-sm mt-3">
-                        <thead class="text-xs uppercase text-slate-500">
+                        <thead class="text-xs uppercase text-slate-400">
                             <tr class="border-b">
                                 <th class="text-left py-2">Окно</th>
                                 <th class="text-right">Вернулись</th>
@@ -453,17 +453,17 @@
                             </tr>
                         </thead>
                         <tbody>
-                            <tr class="border-b border-slate-50">
+                            <tr class="border-b border-slate-800">
                                 <td class="py-2 font-medium">За 30 дней</td>
                                 <td class="text-right">{{ fmt_int(reactivation.reactivated_30d) }}</td>
                                 <td class="text-right font-semibold">{{ fmt_pct(reactivation.rate_30d_pct) }}</td>
                             </tr>
-                            <tr class="border-b border-slate-50">
+                            <tr class="border-b border-slate-800">
                                 <td class="py-2 font-medium">За 60 дней</td>
                                 <td class="text-right">{{ fmt_int(reactivation.reactivated_60d) }}</td>
                                 <td class="text-right font-semibold">{{ fmt_pct(reactivation.rate_60d_pct) }}</td>
                             </tr>
-                            <tr class="border-b border-slate-50">
+                            <tr class="border-b border-slate-800">
                                 <td class="py-2 font-medium">За 90 дней</td>
                                 <td class="text-right">{{ fmt_int(reactivation.reactivated_90d) }}</td>
                                 <td class="text-right font-semibold">{{ fmt_pct(reactivation.rate_90d_pct) }}</td>
@@ -471,7 +471,7 @@
                         </tbody>
                         <tfoot>
                             <tr>
-                                <td class="pt-3 text-xs text-slate-400" colspan="3">Всего churn-событий: {{ fmt_int(reactivation.total_churn_events) }}</td>
+                                <td class="pt-3 text-xs text-slate-500" colspan="3">Всего churn-событий: {{ fmt_int(reactivation.total_churn_events) }}</td>
                             </tr>
                         </tfoot>
                     </table>
@@ -479,12 +479,12 @@
             </div>
 
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-                <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+                <div class="bg-slate-900 rounded-xl p-6 shadow-sm border border-slate-800">
                     <h2 class="text-lg font-semibold">Refund rate по месяцам</h2>
                     <p class="hint">Норма меньше 1%, тревога 2%+ (юзеры разочаровываются). Копайся в причинах через support.</p>
                     <div class="chart-container"><canvas id="refundChart"></canvas></div>
                 </div>
-                <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+                <div class="bg-slate-900 rounded-xl p-6 shadow-sm border border-slate-800">
                     <h2 class="text-lg font-semibold">Failed recurring payments</h2>
                     <p class="hint">Норма 5-10%, выше уже проблема. Лечится dunning (повторные попытки). Если 15%+, теряешь 1/6 базы каждый месяц на пустом месте.</p>
                     <div class="chart-container"><canvas id="failedChart"></canvas></div>
@@ -495,31 +495,31 @@
         <!-- TAB: Юнит-экономика -->
         <div id="tab-unit-economics" class="tab-panel">
             <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-3">
-                <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
-                    <div class="text-xs text-slate-500 uppercase tracking-wider">AI cost per MAU</div>
+                <div class="bg-slate-900 rounded-xl p-5 shadow-sm border border-slate-800">
+                    <div class="text-xs text-slate-400 uppercase tracking-wider">AI cost per MAU</div>
                     <div class="text-2xl font-bold mt-2 kpi-value">{{ fmt_rub(unit_summary.avg_ai_cost_per_active_user) }}</div>
-                    <div class="text-xs text-slate-400 mt-1">median: {{ fmt_rub(unit_summary.median_ai_cost_per_active_user) }}</div>
+                    <div class="text-xs text-slate-500 mt-1">median: {{ fmt_rub(unit_summary.median_ai_cost_per_active_user) }}</div>
                 </div>
-                <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
-                    <div class="text-xs text-slate-500 uppercase tracking-wider">MAU</div>
+                <div class="bg-slate-900 rounded-xl p-5 shadow-sm border border-slate-800">
+                    <div class="text-xs text-slate-400 uppercase tracking-wider">MAU</div>
                     <div class="text-2xl font-bold mt-2 kpi-value">{{ fmt_int(unit_summary.mau) }}</div>
-                    <div class="text-xs text-slate-400 mt-1">за 30 дней</div>
+                    <div class="text-xs text-slate-500 mt-1">за 30 дней</div>
                 </div>
-                <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
-                    <div class="text-xs text-slate-500 uppercase tracking-wider">Unit-negative</div>
+                <div class="bg-slate-900 rounded-xl p-5 shadow-sm border border-slate-800">
+                    <div class="text-xs text-slate-400 uppercase tracking-wider">Unit-negative</div>
                     <div class="text-2xl font-bold mt-2 kpi-value
-                        {% if unit_summary.unit_negative_pct and unit_summary.unit_negative_pct|float > 30 %}text-rose-600{% else %}text-slate-900{% endif %}">
+                        {% if unit_summary.unit_negative_pct and unit_summary.unit_negative_pct|float > 30 %}text-rose-400{% else %}text-slate-100{% endif %}">
                         {{ fmt_pct(unit_summary.unit_negative_pct) }}
                     </div>
-                    <div class="text-xs text-slate-400 mt-1">{{ fmt_int(unit_summary.unit_negative_users) }} из {{ fmt_int(unit_summary.total_users_with_econ) }}</div>
+                    <div class="text-xs text-slate-500 mt-1">{{ fmt_int(unit_summary.unit_negative_users) }} из {{ fmt_int(unit_summary.total_users_with_econ) }}</div>
                 </div>
-                <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
-                    <div class="text-xs text-slate-500 uppercase tracking-wider">Gross margin (lifetime)</div>
+                <div class="bg-slate-900 rounded-xl p-5 shadow-sm border border-slate-800">
+                    <div class="text-xs text-slate-400 uppercase tracking-wider">Gross margin (lifetime)</div>
                     <div class="text-2xl font-bold mt-2 kpi-value
-                        {% if overall.total_gross_margin_rub|float < 0 %}text-rose-600{% else %}text-emerald-600{% endif %}">
+                        {% if overall.total_gross_margin_rub|float < 0 %}text-rose-400{% else %}text-emerald-400{% endif %}">
                         {{ fmt_rub(overall.total_gross_margin_rub) }}
                     </div>
-                    <div class="text-xs text-slate-400 mt-1">Revenue минус AI</div>
+                    <div class="text-xs text-slate-500 mt-1">Revenue минус AI</div>
                 </div>
             </div>
             <p class="hint mb-8">
@@ -527,17 +527,17 @@
             </p>
 
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-                <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+                <div class="bg-slate-900 rounded-xl p-6 shadow-sm border border-slate-800">
                     <h2 class="text-lg font-semibold">Распределение gross margin по юзерам</h2>
                     <p class="hint">Левый столбик "Убыточные": кто стоит дороже чем платит. Если он гигантский, тебя ест бесплатка. Правые столбики "1000+" это якоря, окупающие остальных. Идеал: длинный хвост вправо.</p>
                     <div class="chart-container"><canvas id="marginDistChart"></canvas></div>
                 </div>
-                <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+                <div class="bg-slate-900 rounded-xl p-6 shadow-sm border border-slate-800">
                     <h2 class="text-lg font-semibold">AI cost by feature (lifetime)</h2>
                     <p class="hint">photo_analysis обычно самая дорогая. Если 80%+ расходов идёт на одну фичу, оптимизация именно её даёт максимум. Кандидаты: кэширование, более дешёвые модели, лимиты по тарифам.</p>
                     {% if ai_by_feature %}
                     <table class="w-full text-sm mt-3">
-                        <thead class="text-xs uppercase text-slate-500">
+                        <thead class="text-xs uppercase text-slate-400">
                             <tr class="border-b">
                                 <th class="text-left py-2">Тип</th>
                                 <th class="text-right">Запросов</th>
@@ -548,7 +548,7 @@
                         </thead>
                         <tbody>
                             {% for row in ai_by_feature %}
-                            <tr class="border-b border-slate-50">
+                            <tr class="border-b border-slate-800">
                                 <td class="py-2 font-medium">{{ row.request_type }}</td>
                                 <td class="text-right">{{ fmt_int(row.requests) }}</td>
                                 <td class="text-right">{{ fmt_int(row.unique_users) }}</td>
@@ -559,24 +559,24 @@
                         </tbody>
                     </table>
                     {% else %}
-                    <p class="text-slate-400 text-sm">Данных нет.</p>
+                    <p class="text-slate-500 text-sm">Данных нет.</p>
                     {% endif %}
                 </div>
             </div>
 
-            <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100 mb-8">
+            <div class="bg-slate-900 rounded-xl p-6 shadow-sm border border-slate-800 mb-8">
                 <h2 class="text-lg font-semibold">LTV by cohort (lifetime revenue per user)</h2>
                 <p class="hint">Накопленная выручка на юзера когорты по месяцам жизни. Если все линии стремятся к одному плато, LTV стабильна. Если новые когорты выше старых, продукт улучшается.</p>
                 <div class="chart-container" style="height: 360px;"><canvas id="ltvChart"></canvas></div>
             </div>
 
-            <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100 mb-8">
+            <div class="bg-slate-900 rounded-xl p-6 shadow-sm border border-slate-800 mb-8">
                 <h2 class="text-lg font-semibold">Payback period by cohort</h2>
                 <p class="hint">За сколько дней средний юзер окупил AI-расходы (медиана). Если 30 дней, юзер становится прибыльным через месяц. Чем меньше, тем агрессивнее можно тратить на маркетинг.</p>
                 {% if payback_cohorts %}
                 <div class="overflow-x-auto mt-3">
                     <table class="w-full text-sm">
-                        <thead class="text-xs uppercase text-slate-500">
+                        <thead class="text-xs uppercase text-slate-400">
                             <tr class="border-b">
                                 <th class="text-left py-2">Когорта</th>
                                 <th class="text-right">Размер</th>
@@ -588,30 +588,30 @@
                         </thead>
                         <tbody>
                             {% for row in payback_cohorts %}
-                            <tr class="border-b border-slate-50">
+                            <tr class="border-b border-slate-800">
                                 <td class="py-2 font-medium">{{ fmt_month(row.cohort_month) }}</td>
                                 <td class="text-right">{{ fmt_int(row.cohort_size) }}</td>
                                 <td class="text-right">{{ fmt_int(row.paid_back_users) }}</td>
                                 <td class="text-right">{{ fmt_pct(row.payback_rate_pct) }}</td>
                                 <td class="text-right font-semibold">{{ fmt_int(row.median_payback_days) }}</td>
-                                <td class="text-right text-slate-500">{{ fmt_int(row.avg_payback_days) }}</td>
+                                <td class="text-right text-slate-400">{{ fmt_int(row.avg_payback_days) }}</td>
                             </tr>
                             {% endfor %}
                         </tbody>
                     </table>
                 </div>
                 {% else %}
-                <p class="text-slate-400 text-sm">Данных пока нет.</p>
+                <p class="text-slate-500 text-sm">Данных пока нет.</p>
                 {% endif %}
             </div>
 
-            <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100 mb-8">
+            <div class="bg-slate-900 rounded-xl p-6 shadow-sm border border-slate-800 mb-8">
                 <h2 class="text-lg font-semibold">Heavy users: разрез по типам запросов</h2>
                 <p class="hint">Топ-20 юзеров по AI расходам с разбивкой по фичам. Видно, кто на чём конкретно жжёт. Если у такого юзера красная margin и он не платит, кандидат на лимиты бесплатки.</p>
                 {% if heavy_users_ext %}
                 <div class="overflow-x-auto mt-3">
                     <table class="w-full text-sm">
-                        <thead class="text-xs uppercase text-slate-500">
+                        <thead class="text-xs uppercase text-slate-400">
                             <tr class="border-b">
                                 <th class="text-left py-2">User ID</th>
                                 <th class="text-left">Регистрация</th>
@@ -625,16 +625,16 @@
                         </thead>
                         <tbody>
                             {% for u in heavy_users_ext %}
-                            <tr class="border-b border-slate-50">
+                            <tr class="border-b border-slate-800">
                                 <td class="py-2 font-mono text-xs">{{ u.user_id }}</td>
-                                <td class="text-slate-500">{{ fmt_date(u.user_created_at) }}</td>
-                                <td class="text-right">{{ fmt_int(u.photo_requests) }} <span class="text-xs text-slate-400">({{ fmt_rub(u.photo_cost_rub) }})</span></td>
-                                <td class="text-right">{{ fmt_int(u.qa_requests) }} <span class="text-xs text-slate-400">({{ fmt_rub(u.qa_cost_rub) }})</span></td>
-                                <td class="text-right">{{ fmt_int(u.growing_requests) }} <span class="text-xs text-slate-400">({{ fmt_rub(u.growing_cost_rub) }})</span></td>
+                                <td class="text-slate-400">{{ fmt_date(u.user_created_at) }}</td>
+                                <td class="text-right">{{ fmt_int(u.photo_requests) }} <span class="text-xs text-slate-500">({{ fmt_rub(u.photo_cost_rub) }})</span></td>
+                                <td class="text-right">{{ fmt_int(u.qa_requests) }} <span class="text-xs text-slate-500">({{ fmt_rub(u.qa_cost_rub) }})</span></td>
+                                <td class="text-right">{{ fmt_int(u.growing_requests) }} <span class="text-xs text-slate-500">({{ fmt_rub(u.growing_cost_rub) }})</span></td>
                                 <td class="text-right font-semibold">{{ fmt_rub(u.total_cost_rub) }}</td>
                                 <td class="text-right">{{ fmt_rub(u.lifetime_revenue_rub) }}</td>
                                 <td class="text-right
-                                    {% if u.gross_margin_rub|float < 0 %}text-rose-600{% else %}text-emerald-600{% endif %}">
+                                    {% if u.gross_margin_rub|float < 0 %}text-rose-400{% else %}text-emerald-400{% endif %}">
                                     {{ fmt_rub(u.gross_margin_rub) }}
                                 </td>
                             </tr>
@@ -643,22 +643,22 @@
                     </table>
                 </div>
                 {% else %}
-                <p class="text-slate-400 text-sm">Данных пока нет.</p>
+                <p class="text-slate-500 text-sm">Данных пока нет.</p>
                 {% endif %}
             </div>
         </div>
 
         <!-- TAB: Когорты -->
         <div id="tab-cohorts" class="tab-panel">
-            <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100 mb-8">
+            <div class="bg-slate-900 rounded-xl p-6 shadow-sm border border-slate-800 mb-8">
                 <h2 class="text-lg font-semibold">Retention triangle (по месяцам жизни)</h2>
                 <p class="hint">Та самая метрика для PMF. Строки когорты регистрации, колонки сколько % активны через 1, 2, 3...12 месяцев жизни. Если числа стабилизируются на каком-то уровне (например 25%), это плато и сигнал PMF. Если падают до нуля, продукт не цепляет. Активный значит: за месяц был заход, фото, вопрос или полив.</p>
                 {% if retention_triangle.cohorts %}
                 <div class="overflow-x-auto mt-3">
                     <table class="w-full">
                         <thead>
-                            <tr class="border-b text-xs uppercase text-slate-500">
-                                <th class="text-left py-2 pr-3 sticky left-0 bg-white">Когорта</th>
+                            <tr class="border-b text-xs uppercase text-slate-400">
+                                <th class="text-left py-2 pr-3 sticky left-0 bg-slate-900">Когорта</th>
                                 <th class="text-right pr-3">Размер</th>
                                 {% for lm in retention_triangle.life_months %}
                                 <th class="text-right ret-cell">М{{ lm }}</th>
@@ -667,9 +667,9 @@
                         </thead>
                         <tbody>
                             {% for i in range(retention_triangle.cohorts|length) %}
-                            <tr class="border-b border-slate-50">
-                                <td class="py-2 pr-3 font-medium sticky left-0 bg-white">{{ retention_triangle.cohorts[i].month }}</td>
-                                <td class="text-right pr-3 text-slate-500">{{ fmt_int(retention_triangle.cohorts[i].size) }}</td>
+                            <tr class="border-b border-slate-800">
+                                <td class="py-2 pr-3 font-medium sticky left-0 bg-slate-900">{{ retention_triangle.cohorts[i].month }}</td>
+                                <td class="text-right pr-3 text-slate-400">{{ fmt_int(retention_triangle.cohorts[i].size) }}</td>
                                 {% for cell in retention_triangle.cells[i] %}
                                     {% if cell is none %}
                                     <td class="ret-cell ret-na text-right">-</td>
@@ -683,23 +683,23 @@
                     </table>
                 </div>
                 {% else %}
-                <p class="text-slate-400 text-sm">Когортных данных пока нет.</p>
+                <p class="text-slate-500 text-sm">Когортных данных пока нет.</p>
                 {% endif %}
             </div>
 
-            <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100 mb-8">
+            <div class="bg-slate-900 rounded-xl p-6 shadow-sm border border-slate-800 mb-8">
                 <h2 class="text-lg font-semibold">Retention curve (последние 6 когорт)</h2>
                 <p class="hint">Тот же triangle, но как график. Хорошо если линии новых когорт идут выше старых. Плато (горизонтальная часть) это PMF-сигнал.</p>
                 <div class="chart-container" style="height: 360px;"><canvas id="retentionCurveChart"></canvas></div>
             </div>
 
-            <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100 mb-8">
+            <div class="bg-slate-900 rounded-xl p-6 shadow-sm border border-slate-800 mb-8">
                 <h2 class="text-lg font-semibold">D7 / D14 / D28 / D90 retention (по неделям)</h2>
                 <p class="hint">Классика consumer-метрик. Хорошие ориентиры: D7 30-50%, D28 15-25%, D90 5-15%. Прочерки значит когорта ещё слишком молодая.</p>
                 {% if cohort_dn %}
                 <div class="overflow-x-auto mt-3">
                     <table class="w-full text-sm">
-                        <thead class="text-xs uppercase text-slate-500">
+                        <thead class="text-xs uppercase text-slate-400">
                             <tr class="border-b">
                                 <th class="text-left py-2">Неделя регистрации</th>
                                 <th class="text-right">Размер</th>
@@ -711,7 +711,7 @@
                         </thead>
                         <tbody>
                             {% for row in cohort_dn %}
-                            <tr class="border-b border-slate-50">
+                            <tr class="border-b border-slate-800">
                                 <td class="py-2 font-medium">{{ fmt_date(row.cohort_week) }}</td>
                                 <td class="text-right">{{ fmt_int(row.cohort_size) }}</td>
                                 <td class="text-right">{{ fmt_pct(row.d7_pct) }}</td>
@@ -724,17 +724,17 @@
                     </table>
                 </div>
                 {% else %}
-                <p class="text-slate-400 text-sm">Когортных данных пока нет.</p>
+                <p class="text-slate-500 text-sm">Когортных данных пока нет.</p>
                 {% endif %}
             </div>
 
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-                <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+                <div class="bg-slate-900 rounded-xl p-6 shadow-sm border border-slate-800">
                     <h2 class="text-lg font-semibold">Subscription retention</h2>
                     <p class="hint">Только для платящих. D30 норма 70-85%, D90 50-70%, D180 30-50%. Если D30 меньше 50%, проблема не в продукте, а в первой неделе подписки.</p>
                     {% if sub_retention %}
                     <table class="w-full text-sm mt-3">
-                        <thead class="text-xs uppercase text-slate-500">
+                        <thead class="text-xs uppercase text-slate-400">
                             <tr class="border-b">
                                 <th class="text-left py-2">Когорта</th>
                                 <th class="text-right">Размер</th>
@@ -746,7 +746,7 @@
                         </thead>
                         <tbody>
                             {% for row in sub_retention %}
-                            <tr class="border-b border-slate-50">
+                            <tr class="border-b border-slate-800">
                                 <td class="py-2 font-medium">{{ fmt_month(row.cohort_month) }}</td>
                                 <td class="text-right">{{ fmt_int(row.cohort_size) }}</td>
                                 <td class="text-right">{{ fmt_pct(row.d30_pct) }}</td>
@@ -758,15 +758,15 @@
                         </tbody>
                     </table>
                     {% else %}
-                    <p class="text-slate-400 text-sm">Подписчиков пока нет.</p>
+                    <p class="text-slate-500 text-sm">Подписчиков пока нет.</p>
                     {% endif %}
                 </div>
-                <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+                <div class="bg-slate-900 rounded-xl p-6 shadow-sm border border-slate-800">
                     <h2 class="text-lg font-semibold">Cumulative cohort revenue</h2>
                     <p class="hint">Сколько денег принесла когорта суммарно. Per user похоже на LTV, но для всех юзеров, не только платящих.</p>
                     {% if cumulative_revenue %}
                     <table class="w-full text-sm mt-3">
-                        <thead class="text-xs uppercase text-slate-500">
+                        <thead class="text-xs uppercase text-slate-400">
                             <tr class="border-b">
                                 <th class="text-left py-2">Когорта</th>
                                 <th class="text-right">Размер</th>
@@ -776,7 +776,7 @@
                         </thead>
                         <tbody>
                             {% for row in cumulative_revenue %}
-                            <tr class="border-b border-slate-50">
+                            <tr class="border-b border-slate-800">
                                 <td class="py-2 font-medium">{{ fmt_month(row.cohort_month) }}</td>
                                 <td class="text-right">{{ fmt_int(row.cohort_size) }}</td>
                                 <td class="text-right">{{ fmt_rub(row.total_revenue_rub) }}</td>
@@ -786,7 +786,7 @@
                         </tbody>
                     </table>
                     {% else %}
-                    <p class="text-slate-400 text-sm">Когортных данных пока нет.</p>
+                    <p class="text-slate-500 text-sm">Когортных данных пока нет.</p>
                     {% endif %}
                 </div>
             </div>
@@ -795,31 +795,31 @@
         <!-- TAB: Продукт -->
         <div id="tab-product" class="tab-panel">
             <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-3">
-                <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
-                    <div class="text-xs text-slate-500 uppercase tracking-wider">Plants per user</div>
+                <div class="bg-slate-900 rounded-xl p-5 shadow-sm border border-slate-800">
+                    <div class="text-xs text-slate-400 uppercase tracking-wider">Plants per user</div>
                     <div class="text-2xl font-bold mt-2 kpi-value">{{ plants_stats.avg_plants }}</div>
-                    <div class="text-xs text-slate-400 mt-1">median: {{ plants_stats.median_plants }}, max: {{ plants_stats.max_plants }}</div>
+                    <div class="text-xs text-slate-500 mt-1">median: {{ plants_stats.median_plants }}, max: {{ plants_stats.max_plants }}</div>
                 </div>
-                <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
-                    <div class="text-xs text-slate-500 uppercase tracking-wider">Без растений</div>
+                <div class="bg-slate-900 rounded-xl p-5 shadow-sm border border-slate-800">
+                    <div class="text-xs text-slate-400 uppercase tracking-wider">Без растений</div>
                     <div class="text-2xl font-bold mt-2 kpi-value
-                        {% if plants_stats.pct_with_no_plants and plants_stats.pct_with_no_plants|float > 50 %}text-rose-600{% else %}text-slate-900{% endif %}">
+                        {% if plants_stats.pct_with_no_plants and plants_stats.pct_with_no_plants|float > 50 %}text-rose-400{% else %}text-slate-100{% endif %}">
                         {{ fmt_pct(plants_stats.pct_with_no_plants) }}
                     </div>
-                    <div class="text-xs text-slate-400 mt-1">{{ fmt_int(plants_stats.users_with_no_plants) }} юзеров</div>
+                    <div class="text-xs text-slate-500 mt-1">{{ fmt_int(plants_stats.users_with_no_plants) }} юзеров</div>
                 </div>
-                <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
-                    <div class="text-xs text-slate-500 uppercase tracking-wider">Photos per user</div>
+                <div class="bg-slate-900 rounded-xl p-5 shadow-sm border border-slate-800">
+                    <div class="text-xs text-slate-400 uppercase tracking-wider">Photos per user</div>
                     <div class="text-2xl font-bold mt-2 kpi-value">{{ photos_stats.avg_photos }}</div>
-                    <div class="text-xs text-slate-400 mt-1">median: {{ photos_stats.median_photos }}, max: {{ photos_stats.max_photos }}</div>
+                    <div class="text-xs text-slate-500 mt-1">median: {{ photos_stats.median_photos }}, max: {{ photos_stats.max_photos }}</div>
                 </div>
-                <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
-                    <div class="text-xs text-slate-500 uppercase tracking-wider">Без фото</div>
+                <div class="bg-slate-900 rounded-xl p-5 shadow-sm border border-slate-800">
+                    <div class="text-xs text-slate-400 uppercase tracking-wider">Без фото</div>
                     <div class="text-2xl font-bold mt-2 kpi-value
-                        {% if photos_stats.pct_with_no_photos and photos_stats.pct_with_no_photos|float > 60 %}text-rose-600{% else %}text-slate-900{% endif %}">
+                        {% if photos_stats.pct_with_no_photos and photos_stats.pct_with_no_photos|float > 60 %}text-rose-400{% else %}text-slate-100{% endif %}">
                         {{ fmt_pct(photos_stats.pct_with_no_photos) }}
                     </div>
-                    <div class="text-xs text-slate-400 mt-1">{{ fmt_int(photos_stats.users_with_no_photos) }} юзеров</div>
+                    <div class="text-xs text-slate-500 mt-1">{{ fmt_int(photos_stats.users_with_no_photos) }} юзеров</div>
                 </div>
             </div>
             <p class="hint mb-8">
@@ -827,17 +827,17 @@
             </p>
 
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-                <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+                <div class="bg-slate-900 rounded-xl p-6 shadow-sm border border-slate-800">
                     <h2 class="text-lg font-semibold">Распределение растений по юзерам</h2>
                     <p class="hint">Форма важнее среднего: если 90% сидят на 0-1, остальные не показатель. Идеал: длинный хвост вправо (есть power users с 10+).</p>
                     <div class="chart-container"><canvas id="plantsDistChart"></canvas></div>
                 </div>
-                <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+                <div class="bg-slate-900 rounded-xl p-6 shadow-sm border border-slate-800">
                     <h2 class="text-lg font-semibold">Растения по состоянию</h2>
                     <p class="hint">Healthy большинство норма. Если sick/dead больше 30%, либо юзеры не справляются, либо AI-диагностика пессимистична.</p>
                     {% if plants_by_state %}
                     <table class="w-full text-sm mt-3">
-                        <thead class="text-xs uppercase text-slate-500">
+                        <thead class="text-xs uppercase text-slate-400">
                             <tr class="border-b">
                                 <th class="text-left py-2">Состояние</th>
                                 <th class="text-right">Растений</th>
@@ -846,7 +846,7 @@
                         </thead>
                         <tbody>
                             {% for row in plants_by_state %}
-                            <tr class="border-b border-slate-50">
+                            <tr class="border-b border-slate-800">
                                 <td class="py-2 font-medium">{{ row.state }}</td>
                                 <td class="text-right">{{ fmt_int(row.plants_count) }}</td>
                                 <td class="text-right font-semibold">{{ fmt_pct(row.share_pct) }}</td>
@@ -855,32 +855,32 @@
                         </tbody>
                     </table>
                     {% else %}
-                    <p class="text-slate-400 text-sm">Растений пока нет.</p>
+                    <p class="text-slate-500 text-sm">Растений пока нет.</p>
                     {% endif %}
                 </div>
             </div>
 
             <!-- Streak block -->
             <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-3">
-                <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
-                    <div class="text-xs text-slate-500 uppercase tracking-wider">С активным streak</div>
-                    <div class="text-2xl font-bold mt-2 kpi-value text-emerald-600">{{ fmt_pct(streak_summary.pct_with_active_streak) }}</div>
-                    <div class="text-xs text-slate-400 mt-1">{{ fmt_int(streak_summary.plants_with_active_streak) }} из {{ fmt_int(streak_summary.total_plants) }}</div>
+                <div class="bg-slate-900 rounded-xl p-5 shadow-sm border border-slate-800">
+                    <div class="text-xs text-slate-400 uppercase tracking-wider">С активным streak</div>
+                    <div class="text-2xl font-bold mt-2 kpi-value text-emerald-400">{{ fmt_pct(streak_summary.pct_with_active_streak) }}</div>
+                    <div class="text-xs text-slate-500 mt-1">{{ fmt_int(streak_summary.plants_with_active_streak) }} из {{ fmt_int(streak_summary.total_plants) }}</div>
                 </div>
-                <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
-                    <div class="text-xs text-slate-500 uppercase tracking-wider">Streak 7+ дней</div>
+                <div class="bg-slate-900 rounded-xl p-5 shadow-sm border border-slate-800">
+                    <div class="text-xs text-slate-400 uppercase tracking-wider">Streak 7+ дней</div>
                     <div class="text-2xl font-bold mt-2 kpi-value">{{ fmt_pct(streak_summary.pct_streak_7plus) }}</div>
-                    <div class="text-xs text-slate-400 mt-1">{{ fmt_int(streak_summary.plants_streak_7plus) }} растений</div>
+                    <div class="text-xs text-slate-500 mt-1">{{ fmt_int(streak_summary.plants_streak_7plus) }} растений</div>
                 </div>
-                <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
-                    <div class="text-xs text-slate-500 uppercase tracking-wider">Streak 30+ дней</div>
+                <div class="bg-slate-900 rounded-xl p-5 shadow-sm border border-slate-800">
+                    <div class="text-xs text-slate-400 uppercase tracking-wider">Streak 30+ дней</div>
                     <div class="text-2xl font-bold mt-2 kpi-value">{{ fmt_pct(streak_summary.pct_streak_30plus) }}</div>
-                    <div class="text-xs text-slate-400 mt-1">{{ fmt_int(streak_summary.plants_streak_30plus) }} растений</div>
+                    <div class="text-xs text-slate-500 mt-1">{{ fmt_int(streak_summary.plants_streak_30plus) }} растений</div>
                 </div>
-                <div class="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
-                    <div class="text-xs text-slate-500 uppercase tracking-wider">All-time max streak</div>
+                <div class="bg-slate-900 rounded-xl p-5 shadow-sm border border-slate-800">
+                    <div class="text-xs text-slate-400 uppercase tracking-wider">All-time max streak</div>
                     <div class="text-2xl font-bold mt-2 kpi-value">{{ fmt_int(streak_summary.all_time_max_streak) }}</div>
-                    <div class="text-xs text-slate-400 mt-1">дней подряд</div>
+                    <div class="text-xs text-slate-500 mt-1">дней подряд</div>
                 </div>
             </div>
             <p class="hint mb-8">
@@ -888,18 +888,18 @@
             </p>
 
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-                <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+                <div class="bg-slate-900 rounded-xl p-6 shadow-sm border border-slate-800">
                     <h2 class="text-lg font-semibold">Распределение длины streak</h2>
                     <p class="hint">Гистограмма current_streak. Большой столбик "0" значит юзеры забили на полив. Хвост вправо (15+, 30+, 90+) это чемпионы регулярности, они почти не churn-ятся.</p>
                     <div class="chart-container"><canvas id="streakDistChart"></canvas></div>
                 </div>
-                <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100">
+                <div class="bg-slate-900 rounded-xl p-6 shadow-sm border border-slate-800">
                     <h2 class="text-lg font-semibold">Топ юзеров по streak</h2>
                     <p class="hint">Самые лояльные юзеры. Их можно опрашивать про продукт, давать ранний доступ к фичам, использовать как social proof.</p>
                     {% if top_streak_users %}
                     <div class="overflow-x-auto mt-3">
                         <table class="w-full text-sm">
-                            <thead class="text-xs uppercase text-slate-500">
+                            <thead class="text-xs uppercase text-slate-400">
                                 <tr class="border-b">
                                     <th class="text-left py-2">User ID</th>
                                     <th class="text-right">Растений</th>
@@ -910,35 +910,35 @@
                             </thead>
                             <tbody>
                                 {% for u in top_streak_users %}
-                                <tr class="border-b border-slate-50">
+                                <tr class="border-b border-slate-800">
                                     <td class="py-2 font-mono text-xs">{{ u.user_id }}</td>
                                     <td class="text-right">{{ fmt_int(u.plants_count) }}</td>
                                     <td class="text-right font-semibold">{{ fmt_int(u.best_max_streak) }}</td>
                                     <td class="text-right">{{ fmt_int(u.best_current_streak) }}</td>
-                                    <td class="text-right text-slate-500">{{ u.avg_current_streak }}</td>
+                                    <td class="text-right text-slate-400">{{ u.avg_current_streak }}</td>
                                 </tr>
                                 {% endfor %}
                             </tbody>
                         </table>
                     </div>
                     {% else %}
-                    <p class="text-slate-400 text-sm mt-3">Юзеров с активным streak пока нет.</p>
+                    <p class="text-slate-500 text-sm mt-3">Юзеров с активным streak пока нет.</p>
                     {% endif %}
                 </div>
             </div>
 
-            <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100 mb-8">
+            <div class="bg-slate-900 rounded-xl p-6 shadow-sm border border-slate-800 mb-8">
                 <h2 class="text-lg font-semibold">AI вопросы по неделям</h2>
                 <p class="hint">Сколько юзеров задают вопросы и сколько в среднем на одного. Растёт active_qa_users, фича QA набирает популярность. Растёт avg per user, юзеры подсаживаются на AI-чат (хорошо для retention, плохо для AI-расходов).</p>
                 <div class="chart-container" style="height: 360px;"><canvas id="qaWeeklyChart"></canvas></div>
             </div>
 
-            <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-100 mb-8">
+            <div class="bg-slate-900 rounded-xl p-6 shadow-sm border border-slate-800 mb-8">
                 <h2 class="text-lg font-semibold">Care actions за 30 дней</h2>
                 <p class="hint">Watering это полив, главный регулярный action. Высокий care это предиктор retention. Если watering меньше 1 на юзера в месяц, юзеры не пользуются продуктом как трекером.</p>
                 {% if care_summary %}
                 <table class="w-full text-sm mt-3">
-                    <thead class="text-xs uppercase text-slate-500">
+                    <thead class="text-xs uppercase text-slate-400">
                         <tr class="border-b">
                             <th class="text-left py-2">Action</th>
                             <th class="text-right">Действий</th>
@@ -949,7 +949,7 @@
                     </thead>
                     <tbody>
                         {% for row in care_summary %}
-                        <tr class="border-b border-slate-50">
+                        <tr class="border-b border-slate-800">
                             <td class="py-2 font-medium">{{ row.action_type }}</td>
                             <td class="text-right">{{ fmt_int(row.actions_count) }}</td>
                             <td class="text-right">{{ fmt_int(row.unique_users) }}</td>
@@ -960,12 +960,12 @@
                     </tbody>
                 </table>
                 {% else %}
-                <p class="text-slate-400 text-sm">Действий ухода за последние 30 дней не было.</p>
+                <p class="text-slate-500 text-sm">Действий ухода за последние 30 дней не было.</p>
                 {% endif %}
             </div>
         </div>
 
-        <div class="text-center text-xs text-slate-400 pb-8">
+        <div class="text-center text-xs text-slate-500 pb-8">
             Bloom AI Analytics. Курс USD/RUB зафиксирован 95 ₽.
         </div>
     </div>
@@ -1014,6 +1014,9 @@
             scales: { y: rubScaleY }
         };
         const cohortPalette = ['#10b981', '#3b82f6', '#8b5cf6', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7', '#ec4899'];
+        Chart.defaults.color = '#cbd5e1';
+        Chart.defaults.borderColor = '#1e293b';
+
 
         new Chart(document.getElementById('revenueChart'), {
             type: 'bar',
