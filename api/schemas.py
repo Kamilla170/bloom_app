@@ -273,14 +273,36 @@ class PlansResponse(BaseModel):
 
 
 class CreatePaymentRequest(BaseModel):
+    """
+    Запрос на создание платежа.
+    payment_token приходит с фронта после tokenization через YooKassa Mobile SDK.
+    """
     plan_id: str
+    payment_token: Optional[str] = None
 
 
 class CreatePaymentResponse(BaseModel):
+    """
+    Ответ на создание платежа.
+    status может быть 'pending', 'waiting_for_capture', 'succeeded', 'canceled' и т.п.
+    confirmation_url используется когда платёж требует 3-D Secure или внешнего редиректа.
+    """
     success: bool
     payment_id: Optional[str] = None
+    status: Optional[str] = None
     confirmation_url: Optional[str] = None
     error: Optional[str] = None
+
+
+class PaymentStatusResponse(BaseModel):
+    """
+    Текущее состояние платежа (для поллинга с фронта после tokenization).
+    Возвращается из GET /payments/status/{payment_id}.
+    """
+    payment_id: str
+    status: str
+    amount: int
+    plan_id: Optional[str] = None
 
 
 class RegisterDeviceRequest(BaseModel):
