@@ -476,3 +476,43 @@ async def get_activation_funnel_weekly() -> list[dict]:
         """,
         cache_key="activation:funnel_weekly",
     )
+
+
+# ============================================================
+# AARRR (пиратские метрики - сводка)
+# ============================================================
+
+async def get_aarrr_acquisition() -> dict:
+    row = await fetchrow(
+        "SELECT * FROM analytics.v_aarrr_acquisition",
+        cache_key="aarrr:acquisition",
+    )
+    return dict(row) if row else {}
+
+
+async def get_aarrr_revenue_trend() -> dict:
+    row = await fetchrow(
+        "SELECT * FROM analytics.v_aarrr_revenue_trend",
+        cache_key="aarrr:revenue",
+    )
+    return dict(row) if row else {}
+
+
+async def get_aarrr_retention() -> dict:
+    row = await fetchrow(
+        "SELECT * FROM analytics.v_aarrr_retention",
+        cache_key="aarrr:retention",
+    )
+    return dict(row) if row else {}
+
+
+# ============================================================
+# AARRR pirate metrics summary
+# ============================================================
+
+async def get_aarrr_summary() -> dict:
+    row = await fetchrow(
+        "SELECT * FROM analytics.v_aarrr_summary",
+        cache_key="aarrr:summary",
+    )
+    return dict(row) if row else {}
