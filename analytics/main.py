@@ -132,104 +132,6 @@ def _build_retention_triangle(rows: list[dict]) -> dict:
     return {"cohorts": cohorts, "cells": cells, "life_months": list(range(13))}
 
 
-def _classify_aarrr(raw: dict) -> dict:
-    """
-    Берёт сырые значения из v_aarrr_summary и формирует структуру,
-    которую ждёт шаблон dashboard.html.
-
-    Статусы: 'great' / 'normal' / 'alarm' / 'neutral' (= no data).
-    """
-    if not raw:
-        raw = {}
-
-    # Acquisition
-    acq_signups = int(raw.get("signups_last_7d") or 0)
-    acq_trend = raw.get("acquisition_trend_pct")
-    if acq_trend is None:
-        acq_status = "neutral" if acq_signups == 0 else "normal"
-    else:
-        t = float(acq_trend)
-        if t < -20:
-            acq_status = "alarm"
-        elif t > 20:
-            acq_status = "great"
-        else:
-            acq_status = "normal"
-
-    # Activation
-    act_rate = raw.get("activation_rate_pct")
-    if act_rate is None or float(act_rate) == 0:
-        act_status = "neutral"
-        act_value = None
-    else:
-        a = float(act_rate)
-        if a < 15:
-            act_status = "alarm"
-        elif a > 30:
-            act_status = "great"
-        else:
-            act_status = "normal"
-        act_value = a
-
-    # Retention D28
-    ret_pct = raw.get("retention_d28_pct")
-    if ret_pct is None:
-        ret_status = "neutral"
-        ret_value = None
-    else:
-        r = float(ret_pct)
-        if r < 10:
-            ret_status = "alarm"
-        elif r > 20:
-            ret_status = "great"
-        else:
-            ret_status = "normal"
-        ret_value = r
-
-    # Revenue: MRR plus trend
-    mrr_now = float(raw.get("mrr_now") or 0)
-    mrr_trend = raw.get("mrr_trend_pct")
-    if mrr_trend is None and mrr_now == 0:
-        rev_status = "neutral"
-    elif mrr_trend is None:
-        rev_status = "great"
-    else:
-        t = float(mrr_trend)
-        if t < 0:
-            rev_status = "alarm"
-        elif t > 0:
-            rev_status = "great"
-        else:
-            rev_status = "normal"
-
-    # Referral: пока не настроено
-    ref_status = "neutral"
-
-    return {
-        "acquisition": {
-            "value": acq_signups,
-            "trend_pct": float(acq_trend) if acq_trend is not None else None,
-            "status": acq_status,
-        },
-        "activation": {
-            "value": act_value,
-            "status": act_status,
-        },
-        "retention": {
-            "value": ret_value,
-            "status": ret_status,
-        },
-        "revenue": {
-            "current_mrr": mrr_now,
-            "trend_pct": float(mrr_trend) if mrr_trend is not None else None,
-            "status": rev_status,
-        },
-        "referral": {
-            "status": ref_status,
-        },
-    }
-
-
 @app.get("/healthz")
 async def healthz():
     return {"status": "ok"}
@@ -289,9 +191,6 @@ async def dashboard(request: Request, _: str = Depends(require_auth)):
         # Activation
         activation_summary = await db.get_activation_summary()
         activation_funnel = await db.get_activation_funnel_weekly()
-
-        # AARRR pirate summary
-        aarrr_raw = await db.get_aarrr_summary()
 
         # AARRR summary
         aarrr_acq = await db.get_aarrr_acquisition()
@@ -537,8 +436,6 @@ async def dashboard(request: Request, _: str = Depends(require_auth)):
             "activation_summary": activation_summary,
             "activation_funnel": activation_funnel,
             # AARRR
-            "aarrr": _classify_aarrr(aarrr_raw),
-            # AARRR summary
             "aarrr": aarrr,
             # Хелперы
             "fmt_rub": _format_rub,
