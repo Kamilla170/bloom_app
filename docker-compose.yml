@@ -1,0 +1,44 @@
+services:
+  api:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    expose:
+      - "8000"
+    volumes:
+      # Сертификат БД Timeweb лежит на хосте в /root/certs/root.crt.
+      # Контейнер по умолчанию не видит файлы хоста, поэтому пробрасываем папку.
+      # Внутри контейнера путь будет /app/certs/root.crt, именно его указываем
+      # в DATABASE_URL (sslrootcert=/app/certs/root.crt).
+      - /root/certs:/app/certs:ro
+
+  dashboard:
+    build: ./analytics
+    restart: unless-stopped
+    env_file: .env
+    expose:
+      - "8000"
+    volumes:
+      - /root/certs:/app/certs:ro
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      - api
+      - dashboard
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./certbot/www:/var/www/certbot:ro
+      - ./certbot/conf:/etc/letsencrypt:ro
+
+  certbot:
+    image: certbot/certbot
+    # Без command: запускается вручную через docker compose run (см. инструкцию).
+    # При обычном docker compose up этот контейнер сразу завершится, это нормально.
+    volumes:
+      - ./certbot/www:/var/www/certbot
+      - ./certbot/conf:/etc/letsencrypt
