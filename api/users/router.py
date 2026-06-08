@@ -14,7 +14,7 @@ from api.schemas import (
     UserProfile, UserSettings, UpdateSettingsRequest, UpdateProfileRequest,
     PlanInfo, UsageStats, SuccessResponse, RegisterDeviceRequest,
 )
-from api.services.cloudinary_service import get_photo_url
+from api.services.storage_service import get_photo_url
 from services.subscription_service import get_user_plan, get_usage_stats
 
 logger = logging.getLogger(__name__)
@@ -272,7 +272,7 @@ async def test_push(user_id: int = Depends(get_current_user)):
     if not is_initialized():
         raise HTTPException(
             status_code=500,
-            detail="Firebase Admin SDK не инициализирован. Проверь переменную FIREBASE_SERVICE_ACCOUNT в Railway.",
+            detail="Firebase Admin SDK не инициализирован. Проверь переменную FIREBASE_SERVICE_ACCOUNT.",
         )
 
     # Проверяем наличие устройств
@@ -299,7 +299,7 @@ async def test_push(user_id: int = Depends(get_current_user)):
     if sent == 0:
         raise HTTPException(
             status_code=500,
-            detail=f"Устройств найдено: {devices_count}, но отправить не удалось. Проверь логи Railway.",
+            detail=f"Устройств найдено: {devices_count}, но отправить не удалось. Проверь логи.",
         )
 
     return SuccessResponse(message=f"Отправлено на {sent} из {devices_count} устройств")
