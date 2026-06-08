@@ -27,7 +27,7 @@ from services.plant_service import (
     _post_chat_auto_message,
 )
 from services.subscription_service import check_limit, increment_usage
-from api.services.cloudinary_service import upload_plant_photo, get_photo_url
+from api.services.storage_service import upload_plant_photo, get_photo_url
 from config import STATE_EMOJI, STATE_NAMES
 from achievements import (
     update_global_watering_streak,
@@ -201,7 +201,7 @@ async def analyze_photo(
 
     result = await analyze_plant_image(image_bytes, user_id=user_id)
 
-    # На фото не растение — лимит не списываем, фото в Cloudinary не грузим
+    # На фото не растение — лимит не списываем, фото в хранилище не грузим
     if not result.get("success") and result.get("error_code") == "not_a_plant":
         raise HTTPException(status_code=400, detail=result["error"])
 
@@ -426,7 +426,7 @@ async def _process_photo_update(
     Возвращает: (analyze_result, photo_url, update_result, newly_unlocked).
 
     Если на фото не растение — возвращает (analyze_result, None, None, []).
-    Лимит не списывается, фото в Cloudinary не грузится, карточка растения не трогается.
+    Лимит не списывается, фото в хранилище не грузится, карточка растения не трогается.
     Решение что делать дальше принимает вызывающий эндпоинт.
     """
     allowed, error_detail = await check_limit(user_id, "analyses")
