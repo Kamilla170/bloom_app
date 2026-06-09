@@ -2,6 +2,7 @@ import logging
 import base64
 import re
 import time
+import os
 from openai import AsyncOpenAI
 
 from config import OPENAI_API_KEY, PLANT_IDENTIFICATION_PROMPT, LEGACY_STATE_MAPPING
@@ -12,7 +13,38 @@ from services.analytics_recorder import record_ai_request
 
 logger = logging.getLogger(__name__)
 
-openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+# === OpenAI клиент ===
+# OpenAI блокирует запросы с российских IP (403 unsupported_country_region_territory),
+# а бэкенд теперь на российском хостинге. Поэтому ходим в OpenAI через релей на
+# Railway (США). Управляется переменными окружения:
+#   OPENAI_PROXY_URL     базовый URL релея, напр. https://bloom-relay.up.railway.app
+#                        (без /v1 на конце, его добавит OpenAI-клиент сам)
+#   OPENAI_PROXY_SECRET  секрет релея (тот же, что RELAY_SECRET на Railway)
+#
+# Если OPENAI_PROXY_URL не задан, клиент работает напрямую с OpenAI по
+# OPENAI_API_KEY (как раньше). Это удобно для локальной отладки вне РФ.
+_PROXY_URL = os.getenv("OPENAI_PROXY_URL")
+_PROXY_SECRET = os.getenv("OPENAI_PROXY_SECRET")
+
+
+def _build_openai_client():
+    if _PROXY_URL:
+        # Через релей: base_url указывает на релей, а в роли api_key уходит
+        # секрет релея (релей проверит его и подставит настоящий ключ OpenAI).
+        base = _PROXY_URL.rstrip("/")
+        if not base.endswith("/v1"):
+            base = base + "/v1"
+        logger.info(f"🔌 OpenAI через релей: {base}")
+        return AsyncOpenAI(api_key=_PROXY_SECRET or "relay", base_url=base)
+
+    if OPENAI_API_KEY:
+        logger.info("🔌 OpenAI напрямую (без релея)")
+        return AsyncOpenAI(api_key=OPENAI_API_KEY)
+
+    return None
+
+
+openai_client = _build_openai_client()
 
 GPT_5_1_MODEL = "gpt-5.1-2025-11-13"
 
