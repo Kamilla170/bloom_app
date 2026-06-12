@@ -14,7 +14,7 @@ from api.schemas import (
     UserProfile, UserSettings, UpdateSettingsRequest, UpdateProfileRequest,
     PlanInfo, UsageStats, SuccessResponse, RegisterDeviceRequest,
 )
-from api.services.storage_service import get_photo_url
+from api.services.storage_service import get_photo_url, delete_user_photos
 from services.subscription_service import get_user_plan, get_usage_stats
 
 logger = logging.getLogger(__name__)
@@ -26,6 +26,40 @@ router = APIRouter(prefix="/me", tags=["user"])
 AVATAR_PRESETS = [
     "sunny", "cowboy", "rocker", "surfer", "classic",
     "nerd", "royal", "dj", "yogi", "astro", "pirate",
+]
+
+# Таблицы, из которых удаляются данные пользователя при удалении аккаунта.
+# Порядок важен: сначала зависимые/дочерние (история, фото, растения),
+# в самом конце — сам users (он удаляется отдельно, не в этом списке).
+# Все перечисленные таблицы имеют колонку user_id (проверено по схеме БД),
+# поэтому удаляем везде просто по user_id.
+_USER_DATA_TABLES = [
+    # история и аналитика, привязанные к растениям и пользователю
+    "ai_requests",
+    "care_history",
+    "daily_watering_log",
+    "plant_analyses_full",
+    "plant_environment",
+    "plant_photos",
+    "plant_problems_log",
+    "plant_qa_history",
+    "plant_state_history",
+    "plant_user_patterns",
+    "reminders",
+    # сами растения
+    "plants",
+    "growing_plants",
+    # прочие данные пользователя
+    "growth_diary",
+    "feedback",
+    "payments",
+    "subscription_events",
+    "subscriptions",
+    "trigger_queue",
+    "usage_limits",
+    "user_achievements",
+    "user_devices",
+    "user_settings",
 ]
 
 
@@ -112,6 +146,58 @@ async def update_profile(
         questions_asked=row.get("questions_asked", 0),
         avatar_preset_id=row.get("avatar_preset_id"),
     )
+
+
+@router.delete("", response_model=SuccessResponse)
+async def delete_account(user_id: int = Depends(get_current_user)):
+    """
+    Полное удаление аккаунта и всех связанных данных (НЕОБРАТИМО).
+
+    Порядок:
+      1) удаляем все строки пользователя из БД в одной транзакции
+         (сначала дочерние таблицы из _USER_DATA_TABLES, в конце — users);
+      2) удаляем все фото пользователя из S3 (best-effort, вне транзакции).
+
+    Удаление строки подписки в БД останавливает автосписания: планировщик
+    process_auto_payments_job больше не найдёт активную подписку и не
+    инициирует платёж. ЮКасса сама по себе повторные платежи не запускает.
+
+    Подтверждение удаления выполняется на стороне приложения (диалог).
+    Этот эндпоинт удаляет данные сразу при авторизованном вызове.
+    """
+    db = await get_db()
+
+    async with db.pool.acquire() as conn:
+        async with conn.transaction():
+            exists = await conn.fetchval(
+                "SELECT 1 FROM users WHERE user_id = $1", user_id
+            )
+            if not exists:
+                raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+            # Дочерние таблицы — все по user_id. Имена таблиц берутся из
+            # статического списка выше (не пользовательский ввод), поэтому
+            # подстановка имени в SQL безопасна.
+            for table in _USER_DATA_TABLES:
+                await conn.execute(f"DELETE FROM {table} WHERE user_id = $1", user_id)
+
+            # В самом конце — сам пользователь.
+            await conn.execute("DELETE FROM users WHERE user_id = $1", user_id)
+
+    logger.info(f"🗑️ Аккаунт удалён из БД: user_id={user_id}")
+
+    # Фото из S3 удаляем вне транзакции БД (best-effort): даже если S3
+    # временно недоступен, персональные данные в БД уже стёрты.
+    try:
+        deleted_photos = await delete_user_photos(user_id)
+        logger.info(f"🗑️ Удалено фото из S3 для user_id={user_id}: {deleted_photos}")
+    except Exception as e:
+        logger.error(
+            f"⚠️ Не удалось удалить фото из S3 (user_id={user_id}): {e}",
+            exc_info=True,
+        )
+
+    return SuccessResponse(message="Аккаунт и все связанные данные удалены")
 
 
 @router.get("/settings", response_model=UserSettings)
