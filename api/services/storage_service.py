@@ -138,6 +138,64 @@ async def upload_plant_photo(image_bytes: bytes, user_id: int, plant_name: str =
     return await asyncio.to_thread(_upload_sync, image_bytes, user_id, plant_name)
 
 
+def _delete_user_photos_sync(user_id: int) -> int:
+    """
+    Синхронно удалить ВСЕ объекты пользователя из S3 под префиксом
+    bloom_plants/user_{user_id}/ (все растения, все размеры).
+
+    Возвращает количество удалённых объектов. Best-effort: ошибки логируются,
+    наружу не пробрасываются (чтобы удаление аккаунта в БД не откатывалось
+    из-за проблем с S3).
+    """
+    client = _get_client()
+    if client is None:
+        logger.error(f"❌ S3 не сконфигурирован, не могу удалить фото user_id={user_id}")
+        return 0
+
+    prefix = f"{KEY_PREFIX}/user_{user_id}/"
+    deleted = 0
+    try:
+        paginator = client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=S3_BUCKET, Prefix=prefix):
+            objects = [{"Key": obj["Key"]} for obj in page.get("Contents", [])]
+            if not objects:
+                continue
+            # delete_objects удаляет до 1000 ключей за один вызов
+            for i in range(0, len(objects), 1000):
+                batch = objects[i:i + 1000]
+                resp = client.delete_objects(
+                    Bucket=S3_BUCKET,
+                    Delete={"Objects": batch, "Quiet": True},
+                )
+                deleted += len(batch)
+                for err in (resp.get("Errors") or []):
+                    logger.error(
+                        f"❌ Не удалён объект S3 {err.get('Key')}: {err.get('Message')}"
+                    )
+                    deleted -= 1
+        logger.info(
+            f"🗑️ Удалено фото из S3 для user_id={user_id}: {deleted} объектов (префикс {prefix})"
+        )
+        return deleted
+    except (BotoCoreError, ClientError) as e:
+        logger.error(f"❌ Ошибка удаления фото из S3 (user_id={user_id}): {e}", exc_info=True)
+        return deleted
+    except Exception as e:
+        logger.error(
+            f"❌ Непредвиденная ошибка удаления фото из S3 (user_id={user_id}): {e}",
+            exc_info=True,
+        )
+        return deleted
+
+
+async def delete_user_photos(user_id: int) -> int:
+    """
+    Асинхронно удалить все фото пользователя из S3 (под префиксом user_{id}).
+    Best-effort: при ошибке S3 возвращает, сколько успели удалить, и не падает.
+    """
+    return await asyncio.to_thread(_delete_user_photos_sync, user_id)
+
+
 def _closest_size(width: int) -> int:
     """Ближайший доступный размер не меньше width (иначе максимальный)."""
     for s in PHOTO_SIZES:
