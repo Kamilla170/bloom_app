@@ -46,7 +46,7 @@ def _build_openai_client():
 
 openai_client = _build_openai_client()
 
-GPT_5_1_MODEL = "gpt-5.1-2025-11-13"
+GPT_5_5_MODEL = "gpt-5.5-2026-04-23"
 
 # Допустимые статусы Этапа 3
 ALLOWED_STATES = {'healthy', 'flowering', 'growing', 'needs_care', 'dormancy'}
@@ -552,7 +552,7 @@ async def answer_plant_question(question: str, plant_context: str = None,
         else:
             user_prompt = f"{seasonal_context}\n\nВОПРОС:\n{question}"
 
-        models_to_try = [GPT_5_1_MODEL, "gpt-4o"]
+        models_to_try = [GPT_5_5_MODEL, "gpt-4o"]
 
         for model_name in models_to_try:
             try:
@@ -566,7 +566,7 @@ async def answer_plant_question(question: str, plant_context: str = None,
                     ]
                 }
 
-                if model_name == GPT_5_1_MODEL:
+                if model_name == GPT_5_5_MODEL:
                     api_params["max_completion_tokens"] = 4000
                     api_params["extra_body"] = {"reasoning_effort": "low"}
                 else:
