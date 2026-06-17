@@ -143,16 +143,17 @@ def start_scheduler():
 
     _scheduler = AsyncIOScheduler(timezone=MOSCOW_TZ)
 
-    # Каждые 5 минут — проверка напоминаний о поливе
-    _scheduler.add_job(
-        send_watering_reminders,
-        trigger="cron",
-        minute="*/5",
-        id="watering_reminders",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-    )
+    # Поливные напоминания переведены на ЛОКАЛЬНЫЕ уведомления в приложении
+    # (flutter_local_notifications). Серверный пуш отключён, чтобы не дублировать.
+    # _scheduler.add_job(
+    #     send_watering_reminders,
+    #     trigger="cron",
+    #     minute="*/5",
+    #     id="watering_reminders",
+    #     replace_existing=True,
+    #     max_instances=1,
+    #     coalesce=True,
+    # )
 
     # Раз в день в 10:00 МСК — автоплатежи
     _scheduler.add_job(
@@ -169,7 +170,7 @@ def start_scheduler():
     _scheduler.start()
     logger.info(
         "✅ Scheduler запущен: "
-        "watering_reminders каждые 5 мин, auto_payments в 10:00 МСК"
+        "auto_payments в 10:00 МСК (watering_reminders отключён, локальные пуши)"
     )
 
 

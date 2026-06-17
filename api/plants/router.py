@@ -408,7 +408,7 @@ async def get_photos(plant_id: int, user_id: int = Depends(get_current_user)):
     return [
         PlantPhotoEntry(
             id=p["id"],
-            photo_url=p["photo_url"],
+            photo_url=get_photo_url(p["photo_url"], 800),
             created_at=p["created_at"],
         )
         for p in photos

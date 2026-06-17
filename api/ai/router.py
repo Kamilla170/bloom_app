@@ -15,6 +15,7 @@ from services.ai_service import answer_plant_question, is_offtopic_refusal
 from services.subscription_service import check_limit, increment_usage
 from plant_memory import get_plant_context, save_interaction
 from database import get_db
+from api.services.storage_service import get_photo_url
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,8 @@ def _qa_row_to_message(qa: dict, plant_name: Optional[str] = None) -> Optional[C
         created = qa.get("question_date") or qa.get("created_at")
         ctx = _parse_context_used(qa.get("context_used"))
 
-        photo_url = ctx.get("photo_url") if isinstance(ctx, dict) else None
+        _raw_photo = ctx.get("photo_url") if isinstance(ctx, dict) else None
+        photo_url = get_photo_url(_raw_photo, 800) if _raw_photo else None
         msg_type = ctx.get("type") if isinstance(ctx, dict) else None
         if msg_type not in {"qa", "auto_analysis", "user_photo"}:
             # Если type не указан, выводим тип из question_text

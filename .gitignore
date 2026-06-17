@@ -1,0 +1,31 @@
+# Секреты и окружение
+.env
+.env.*
+*.env
+
+# Бэкапы
+*.backup
+*.bak
+
+# Сертификаты и ключи
+certs/
+*.crt
+*.key
+*.pem
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Логи
+*.log
+
+# Certbot (локальные данные)
+certbot/conf/
+certbot/www/
+
+# Nginx локальные конфиги с реальными доменами
+nginx/conf.d/*.real

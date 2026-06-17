@@ -27,7 +27,7 @@ import hashlib
 import boto3
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
-from PIL import Image
+from PIL import Image, ImageOps
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +78,7 @@ def _make_square_jpeg(image_bytes: bytes, size: int) -> bytes:
     Повторяет поведение Cloudinary c_fill: заполняем квадрат, лишнее обрезаем.
     """
     img = Image.open(io.BytesIO(image_bytes))
+    img = ImageOps.exif_transpose(img)
     if img.mode != "RGB":
         img = img.convert("RGB")
 
