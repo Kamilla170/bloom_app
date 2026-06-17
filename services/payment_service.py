@@ -20,6 +20,10 @@ logger = logging.getLogger(__name__)
 
 YOOKASSA_API_URL = "https://api.yookassa.ru/v3"
 
+# Флаг, что колонка payments.subscription_granted уже гарантированно создана
+# в текущем процессе. Чтобы не гонять ALTER TABLE на каждый запрос статуса.
+_granted_column_ensured = False
+
 
 def _get_auth_header() -> str:
     credentials = f"{YOOKASSA_SHOP_ID}:{YOOKASSA_SECRET_KEY}"
@@ -35,6 +39,173 @@ def _get_headers(idempotency_key: str = None) -> dict:
     if idempotency_key:
         headers["Idempotence-Key"] = idempotency_key
     return headers
+
+
+async def _ensure_subscription_granted_column():
+    """
+    Миграция: колонка-флаг payments.subscription_granted.
+    Защищает от двойной выдачи подписки за один платёж (webhook + поллинг).
+    Выполняется один раз за жизнь процесса (IF NOT EXISTS — безопасно).
+    """
+    global _granted_column_ensured
+    if _granted_column_ensured:
+        return
+    try:
+        from database import get_db
+        db = await get_db()
+        async with db.pool.acquire() as conn:
+            await conn.execute(
+                "ALTER TABLE payments ADD COLUMN IF NOT EXISTS "
+                "subscription_granted BOOLEAN DEFAULT FALSE"
+            )
+        _granted_column_ensured = True
+    except Exception as e:
+        logger.error(f"❌ Не удалось создать колонку subscription_granted: {e}", exc_info=True)
+
+
+async def _try_claim_payment(payment_id: str) -> bool:
+    """
+    Атомарно "занять" платёж для выдачи подписки.
+
+    Возвращает True, если этот вызов первым перевёл subscription_granted в TRUE
+    (значит можно выдавать подписку). Возвращает False, если флаг уже был занят
+    (значит подписку за этот платёж уже выдал кто-то другой - webhook или
+    предыдущий поллинг). Атомарность гарантирует БД: UPDATE ... WHERE
+    subscription_granted = FALSE отработает ровно у одного конкурента.
+    """
+    await _ensure_subscription_granted_column()
+    try:
+        from database import get_db
+        db = await get_db()
+        async with db.pool.acquire() as conn:
+            claimed = await conn.fetchval(
+                """
+                UPDATE payments
+                SET subscription_granted = TRUE, updated_at = CURRENT_TIMESTAMP
+                WHERE payment_id = $1 AND subscription_granted = FALSE
+                RETURNING payment_id
+                """,
+                payment_id,
+            )
+        return claimed is not None
+    except Exception as e:
+        logger.error(f"❌ Ошибка claim платежа {payment_id}: {e}", exc_info=True)
+        return False
+
+
+async def _release_claim(payment_id: str):
+    """
+    Откатить захват флага (если после claim не удалось довести выдачу подписки,
+    например не получили данные платежа). Чтобы webhook/следующий поллинг
+    смогли попробовать снова.
+    """
+    try:
+        from database import get_db
+        db = await get_db()
+        async with db.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE payments
+                SET subscription_granted = FALSE, updated_at = CURRENT_TIMESTAMP
+                WHERE payment_id = $1
+                """,
+                payment_id,
+            )
+    except Exception as e:
+        logger.error(f"❌ Ошибка release claim {payment_id}: {e}", exc_info=True)
+
+
+async def _fetch_payment_from_yookassa(payment_id: str) -> Optional[Dict]:
+    """Запросить актуальный объект платежа у YooKassa."""
+    if not YOOKASSA_SHOP_ID or not YOOKASSA_SECRET_KEY:
+        return None
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{YOOKASSA_API_URL}/payments/{payment_id}",
+                headers=_get_headers(),
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+    except Exception as e:
+        logger.error(f"❌ Не удалось получить платёж {payment_id} из YooKassa: {e}")
+    return None
+
+
+async def _maybe_grant_subscription(
+    payment_id: str,
+    user_id: int,
+    yookassa_data: Optional[Dict] = None,
+):
+    """
+    Фоллбэк-выдача подписки при поллинге, если платёж succeeded, но подписка
+    ещё не выдана (например, webhook не дошёл).
+
+    Защита от дублей: сначала атомарно занимаем флаг. Если заняли - выдаём,
+    если нет - значит webhook (или другой поллинг) уже выдал, выходим.
+
+    metadata (days/amount/plan_id) и payment_method берём из объекта платежа
+    YooKassa - так же, как это делает webhook из своего payload.
+    """
+    claimed = await _try_claim_payment(payment_id)
+    if not claimed:
+        # Подписку за этот платёж уже выдали (webhook успел) - не дублируем.
+        return
+
+    # Данные платежа нужны для activate_pro. Если не передали - запросим.
+    if yookassa_data is None:
+        yookassa_data = await _fetch_payment_from_yookassa(payment_id)
+
+    if not yookassa_data:
+        # Не смогли получить данные - откатываем захват, чтобы webhook/следующий
+        # поллинг попробовали снова. Иначе подписка потеряется навсегда.
+        await _release_claim(payment_id)
+        logger.warning(
+            f"⚠️ Фоллбэк: не удалось получить данные платежа {payment_id}, claim откатан"
+        )
+        return
+
+    metadata = yookassa_data.get("metadata", {}) or {}
+    days = int(metadata.get("days", 30))
+    amount = int(metadata.get("amount", PRO_PRICE))
+    plan_id = metadata.get("plan_id") or None
+    plan_label = metadata.get("plan_label", f"{days} дней")
+
+    payment_method = yookassa_data.get("payment_method", {}) or {}
+    payment_method_id = payment_method.get("id") if payment_method.get("saved") else None
+
+    # Сохраняем payment_method_id (для будущих автоплатежей), как делает webhook.
+    if payment_method_id:
+        try:
+            from database import get_db
+            db = await get_db()
+            async with db.pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE payments SET payment_method_id = $1, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE payment_id = $2",
+                    payment_method_id, payment_id,
+                )
+        except Exception as e:
+            logger.error(f"❌ Не удалось сохранить payment_method_id (фоллбэк): {e}")
+
+    from services.subscription_service import activate_pro
+    expires_at = await activate_pro(
+        user_id,
+        days=days,
+        amount=amount,
+        payment_method_id=payment_method_id,
+        plan_id=plan_id,
+        payment_id=payment_id,
+        source="polling_fallback",
+    )
+
+    logger.info(
+        f"✅ Подписка активирована (фоллбэк-поллинг): user_id={user_id}, "
+        f"plan_id={plan_id}, план={plan_label}, expires={expires_at}"
+    )
+
+    await _notify_user_payment_success(user_id, expires_at, plan_label)
 
 
 async def create_payment(
@@ -130,6 +301,9 @@ async def get_payment_status(payment_id: str) -> Optional[Dict]:
     """
     Получить актуальный статус платежа.
     Сначала смотрим в БД, если статус не финальный - запрашиваем YooKassa.
+
+    Фоллбэк: если платёж succeeded, но подписка ещё не выдана (webhook не дошёл),
+    выдаём подписку прямо здесь - с защитой от двойной выдачи через claim-флаг.
     """
     from database import get_db
     db = await get_db()
@@ -144,7 +318,21 @@ async def get_payment_status(payment_id: str) -> Optional[Dict]:
         return None
 
     status = row["status"]
-    if status in ("succeeded", "canceled"):
+
+    # canceled - финальный статус, ничего не выдаём.
+    if status == "canceled":
+        return {
+            "payment_id": row["payment_id"],
+            "status": status,
+            "amount": row["amount"],
+            "plan_id": row["plan_id"],
+        }
+
+    # succeeded в базе: статус уже финальный, но могла не выполниться выдача
+    # подписки (например, webhook записал статус, а activate_pro упал). Пробуем
+    # выдать через фоллбэк - claim не даст задвоить, если подписка уже выдана.
+    if status == "succeeded":
+        await _maybe_grant_subscription(payment_id, row["user_id"])
         return {
             "payment_id": row["payment_id"],
             "status": status,
@@ -177,6 +365,14 @@ async def get_payment_status(payment_id: str) -> Optional[Dict]:
                                 "UPDATE payments SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE payment_id = $2",
                                 fresh_status, payment_id,
                             )
+
+                    # Фоллбэк: платёж только что стал succeeded - выдаём подписку,
+                    # если её ещё не выдал webhook. Данные платежа уже есть в data.
+                    if fresh_status == "succeeded":
+                        await _maybe_grant_subscription(
+                            payment_id, row["user_id"], yookassa_data=data
+                        )
+
                     return {
                         "payment_id": payment_id,
                         "status": fresh_status,
@@ -329,6 +525,16 @@ async def handle_payment_webhook(payload: dict) -> bool:
                     "UPDATE payments SET payment_method_id = $1, updated_at = CURRENT_TIMESTAMP WHERE payment_id = $2",
                     payment_method_id, payment_id,
                 )
+
+            # Защита от двойной выдачи: занимаем платёж. Если фоллбэк-поллинг уже
+            # успел выдать подписку - claim вернёт False, и мы не задвоим.
+            claimed = await _try_claim_payment(payment_id)
+            if not claimed:
+                logger.info(
+                    f"ℹ️ Webhook: подписка за платёж {payment_id} уже выдана (фоллбэк успел), пропускаем"
+                )
+                await mark_webhook_processed(webhook_id)
+                return True
 
             from services.subscription_service import activate_pro
             expires_at = await activate_pro(
