@@ -279,7 +279,7 @@ async def auth_email_request(req: EmailLoginRequest):
     зарегистрирован адрес или нет).
     """
     email = req.email.strip().lower()
-    if len(email) > 254 or not _EMAIL_RE.match(email):
+    if len(email) > 254 or not email.isascii() or not _EMAIL_RE.match(email):
         raise HTTPException(status_code=400, detail="Некорректный email")
 
     db = await get_db()
