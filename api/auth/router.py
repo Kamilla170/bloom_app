@@ -26,6 +26,10 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 # Стартовый user_id для app-пользователей (чтобы не пересекаться с Telegram ID)
 APP_USER_ID_START = 5_000_000_000
 
+# Версия юр-документов, которую принимает пользователь при регистрации.
+# Держать в синхроне с DOCS_VERSION в api/legal.py.
+TERMS_VERSION = "2026-06-19"
+
 # OAuth client IDs из переменных окружения
 YANDEX_CLIENT_ID = os.getenv("YANDEX_CLIENT_ID")
 YANDEX_CLIENT_SECRET = os.getenv("YANDEX_CLIENT_SECRET")
@@ -88,10 +92,12 @@ async def _find_or_create_user(
         INSERT INTO users (
             user_id, email, first_name,
             auth_provider, provider_user_id,
-            last_activity, last_action
+            last_activity, last_action,
+            terms_accepted_at, terms_version
         )
-        VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, $6)
-    """, user_id, email, first_name, provider, provider_user_id, f"{provider}_register")
+        VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, $6, CURRENT_TIMESTAMP, $7)
+    """, user_id, email, first_name, provider, provider_user_id,
+         f"{provider}_register", TERMS_VERSION)
 
     await conn.execute("""
         INSERT INTO user_settings (user_id) VALUES ($1)
