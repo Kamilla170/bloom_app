@@ -8,7 +8,7 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import RedirectResponse
 # Добавляем корневую директорию проекта в sys.path
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT_DIR not in sys.path:
@@ -179,89 +179,25 @@ async def health():
 @app.get("/")
 async def root():
     return {"message": "Bloom AI API", "docs": "/docs"}
-# === OAuth callback: возврат в мобильное приложение через кастомную схему ===
+# === OAuth callback: серверный 302 на кастомную схему мобильного приложения ===
 #
-# Yandex OAuth не поддерживает кастомные схемы (bloomai://) в redirect_uri,
-# поэтому redirect_uri указывает на эту HTTPS-страницу, а она возвращает
-# пользователя в приложение по схеме bloomai://.
+# Yandex OAuth не поддерживает кастомные схемы (bloomai://) в redirect_uri.
+# Поэтому регистрируем HTTPS-страницу на нашем бэке, а она делает HTTP 302
+# на кастомную схему приложения. intent-filter в манифесте приложения ловит
+# этот редирект и доставляет Uri в приложение через app_links.
 #
-# ВАЖНО про Auth Tab: Custom Tab / Auth Tab на свежих Android НЕ переходит
-# по кастомной схеме из HTTP 302 (Location header) — остаётся на странице и
-# показывает "сайт недоступен". Поэтому отдаём HTML-страницу, которая:
-#   1) сразу пытается перейти на bloomai://... через JavaScript;
-#   2) если автопереход не сработал — показывает кнопку, клик по которой
-#      открывает приложение (переход по клику Auth Tab пропускает).
-#
-# authorization code flow: code приходит в query (не в fragment), поэтому
-# сервер видит его и пробрасывает в схему as is (вместе со state/error и т.д.).
+# Используем authorization code flow: code приходит в query параметрах
+# (не в fragment), поэтому сервер видит его и может пробросить в редирект.
 @app.get("/oauth/yandex/callback")
 async def yandex_oauth_callback(request: Request):
     """
-    Принимает редирект от oauth.yandex.ru и возвращает в мобильное приложение
-    через кастомную схему bloomai://. Сохраняет все query-параметры как есть.
+    Принимает редирект от oauth.yandex.ru и перенаправляет в мобильное
+    приложение через кастомную схему bloomai://.
+    Сохраняет все query параметры как есть (code, state, error и т.д.).
     """
     qs = request.url.query
     target = "bloomai://oauth/yandex/callback"
     if qs:
         target = f"{target}?{qs}"
 
-    # target идёт в href ссылки и в JS-редирект — экранируем кавычки.
-    safe_target = target.replace('"', "%22")
-
-    html = f"""<!DOCTYPE html>
-<html lang="ru">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bloom AI</title>
-<style>
-  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-  body {{
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: #F7F4ED;
-    color: #2b3629;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 24px;
-    text-align: center;
-  }}
-  .logo {{
-    width: 72px; height: 72px;
-    background: #009850;
-    border-radius: 20px;
-    display: flex; align-items: center; justify-content: center;
-    margin-bottom: 24px;
-    font-size: 36px;
-  }}
-  h1 {{ font-size: 20px; font-weight: 700; margin-bottom: 8px; }}
-  p {{ font-size: 15px; color: #737a6f; margin-bottom: 28px; max-width: 320px; line-height: 1.4; }}
-  a.btn {{
-    display: inline-block;
-    background: #009850;
-    color: #ffffff;
-    text-decoration: none;
-    font-size: 16px;
-    font-weight: 600;
-    padding: 14px 32px;
-    border-radius: 28px;
-  }}
-  a.btn:active {{ opacity: 0.85; }}
-</style>
-</head>
-<body>
-  <div class="logo">🌱</div>
-  <h1>Вход выполнен</h1>
-  <p>Возвращаемся в приложение Bloom AI. Если это не произошло автоматически, нажмите кнопку ниже.</p>
-  <a class="btn" href="{safe_target}">Открыть Bloom AI</a>
-  <script>
-    // Сразу пытаемся открыть приложение по кастомной схеме.
-    // На части браузеров сработает автоматически; если нет — остаётся кнопка.
-    window.location.href = "{safe_target}";
-  </script>
-</body>
-</html>"""
-
-    return HTMLResponse(content=html)
+    return RedirectResponse(url=target, status_code=302)
