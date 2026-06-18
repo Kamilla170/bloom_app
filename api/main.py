@@ -161,6 +161,7 @@ from api.analytics.router import (
     router as analytics_router,
     achievements_router,
 )
+from api.legal import router as legal_router
 app.include_router(auth_router)
 app.include_router(plants_router)
 app.include_router(ai_router)
@@ -168,6 +169,7 @@ app.include_router(users_router)
 app.include_router(payments_router)
 app.include_router(analytics_router)
 app.include_router(achievements_router)
+app.include_router(legal_router)
 # === Health check ===
 @app.get("/health")
 async def health():
