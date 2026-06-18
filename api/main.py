@@ -37,6 +37,11 @@ async def run_app_migrations():
         # Удаляем старый уникальный индекс по email (если был) - теперь email не уникален
         await conn.execute("DROP INDEX IF EXISTS idx_users_email")
         logger.info("✅ Миграция: auth_provider, provider_user_id")
+        # --- Согласие с юр-документами (152-ФЗ) ---
+        # Фиксируем момент и редакцию принятых документов при регистрации.
+        await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMP")
+        await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_version TEXT")
+        logger.info("✅ Миграция: terms_accepted_at, terms_version")
         # --- Этап 9: Аналитика и достижения ---
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS total_photos INT DEFAULT 0")
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS global_watering_streak INT DEFAULT 0")
