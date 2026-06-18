@@ -28,6 +28,21 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 
+class EmailLoginRequest(BaseModel):
+    """Запрос magic-link: адрес, на который отправить ссылку входа"""
+    email: str = Field(min_length=3, max_length=320)
+
+
+class EmailLoginResponse(BaseModel):
+    success: bool = True
+    message: str = ""
+
+
+class EmailExchangeRequest(BaseModel):
+    """Обмен одноразового кода из deep link на пару JWT"""
+    code: str = Field(min_length=10, max_length=512)
+
+
 # === USERS ===
 
 class UserProfile(BaseModel):
