@@ -8,7 +8,7 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
 # Добавляем корневую директорию проекта в sys.path
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT_DIR not in sys.path:
@@ -186,6 +186,31 @@ async def health():
 @app.get("/")
 async def root():
     return {"message": "Bloom AI API", "docs": "/docs"}
+# === Android App Links: Digital Asset Links ===
+#
+# Файл по адресу https://api.bloomai.ru/.well-known/assetlinks.json связывает
+# приложение ru.bloomai.app с этим доменом. Android по нему проверяет, что
+# приложению разрешено открывать https-ссылки домена напрямую (App Links).
+# Отпечаток сейчас debug-ключа; при release-сборке просто добавим второй
+# отпечаток в массив sha256_cert_fingerprints, оба будут работать.
+_ASSETLINKS = [
+    {
+        "relation": ["delegate_permission/common.handle_all_urls"],
+        "target": {
+            "namespace": "android_app",
+            "package_name": "ru.bloomai.app",
+            "sha256_cert_fingerprints": [
+                "45:2A:9C:93:46:F9:02:A0:76:2D:89:5F:28:3E:F4:96:6C:19:E2:D8:D0:23:E4:73:2E:5F:3D:23:51:FD:51:3A"
+            ],
+        },
+    }
+]
+
+
+@app.get("/.well-known/assetlinks.json")
+async def assetlinks():
+    """Digital Asset Links для Android App Links (домен ↔ приложение)."""
+    return JSONResponse(content=_ASSETLINKS)
 # === OAuth callback: серверный 302 на кастомную схему мобильного приложения ===
 #
 # Yandex OAuth не поддерживает кастомные схемы (bloomai://) в redirect_uri.
