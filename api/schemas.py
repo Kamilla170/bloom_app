@@ -70,6 +70,9 @@ class UpdateSettingsRequest(BaseModel):
 
 class UpdateProfileRequest(BaseModel):
     avatar_preset_id: Optional[str] = Field(None, min_length=1, max_length=32)
+    # Имя пользователь задаёт вручную в профиле. Пустая строка трактуется
+    # как сброс имени (на бэке станет NULL, приложение покажет заглушку).
+    first_name: Optional[str] = Field(None, max_length=50)
 
 
 # === ACHIEVEMENTS (компактное представление для тостов и для unseen) ===
