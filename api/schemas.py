@@ -9,10 +9,6 @@ from pydantic import BaseModel, Field
 
 # === AUTH ===
 
-class GoogleAuthRequest(BaseModel):
-    id_token: str
-
-
 class YandexAuthRequest(BaseModel):
     """Authorization code, полученный мобильным клиентом через OAuth callback"""
     code: str
