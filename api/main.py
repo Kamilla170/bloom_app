@@ -14,6 +14,8 @@ ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 from database import init_database, get_db
+from slowapi.errors import RateLimitExceeded
+from api.rate_limit import limiter, rate_limit_handler
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -143,12 +145,24 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
 # === App ===
+# /docs, /redoc и /openapi.json открыты только если ENABLE_DOCS=true.
+# В проде переменную не ставим, поэтому карта API закрыта от посторонних.
+# Локально для разработки: ENABLE_DOCS=true uvicorn api.main:app ...
+_DOCS_ENABLED = os.getenv("ENABLE_DOCS", "false").lower() == "true"
 app = FastAPI(
     title="Bloom AI API",
     description="REST API для мобильного приложения Bloom AI",
     version="1.0.0",
     lifespan=lifespan,
+    docs_url="/docs" if _DOCS_ENABLED else None,
+    redoc_url="/redoc" if _DOCS_ENABLED else None,
+    openapi_url="/openapi.json" if _DOCS_ENABLED else None,
 )
+# === Rate limiting (slowapi) ===
+# Лимитер и обработчик 429 объявлены в api/rate_limit.py. Здесь подключаем
+# их к приложению. Сами лимиты висят декораторами на конкретных ручках.
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, rate_limit_handler)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -156,6 +170,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# === Security-заголовки на всех ответах ===
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
 # === Роутеры ===
 from api.auth.router import router as auth_router
 from api.plants.router import router as plants_router
@@ -185,7 +207,7 @@ async def health():
     }
 @app.get("/")
 async def root():
-    return {"message": "Bloom AI API", "docs": "/docs"}
+    return {"message": "Bloom AI API"}
 # === Android App Links: Digital Asset Links ===
 #
 # Файл по адресу https://api.bloomai.ru/.well-known/assetlinks.json связывает
