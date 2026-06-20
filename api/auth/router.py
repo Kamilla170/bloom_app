@@ -10,6 +10,7 @@ import logging
 import httpx
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
 
 from database import get_db
 from api.schemas import (
@@ -25,10 +26,6 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 # Стартовый user_id для app-пользователей (чтобы не пересекаться с Telegram ID)
 APP_USER_ID_START = 5_000_000_000
-
-# Версия юр-документов, которую принимает пользователь при регистрации.
-# Держать в синхроне с DOCS_VERSION в api/legal.py.
-TERMS_VERSION = "2026-06-19"
 
 # OAuth client IDs из переменных окружения
 YANDEX_CLIENT_ID = os.getenv("YANDEX_CLIENT_ID")
@@ -92,12 +89,10 @@ async def _find_or_create_user(
         INSERT INTO users (
             user_id, email, first_name,
             auth_provider, provider_user_id,
-            last_activity, last_action,
-            terms_accepted_at, terms_version
+            last_activity, last_action
         )
-        VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, $6, CURRENT_TIMESTAMP, $7)
-    """, user_id, email, first_name, provider, provider_user_id,
-         f"{provider}_register", TERMS_VERSION)
+        VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, $6)
+    """, user_id, email, first_name, provider, provider_user_id, f"{provider}_register")
 
     await conn.execute("""
         INSERT INTO user_settings (user_id) VALUES ($1)
@@ -285,7 +280,7 @@ async def auth_email_request(req: EmailLoginRequest):
     зарегистрирован адрес или нет).
     """
     email = req.email.strip().lower()
-    if len(email) > 254 or not email.isascii() or not _EMAIL_RE.match(email):
+    if len(email) > 254 or not _EMAIL_RE.match(email):
         raise HTTPException(status_code=400, detail="Некорректный email")
 
     db = await get_db()
@@ -376,6 +371,55 @@ async def auth_email_verify(token: str):
         url=f"{APP_EMAIL_CALLBACK}?code={code}",
         status_code=302,
     )
+
+
+class EmailVerifyTokenRequest(BaseModel):
+    token: str
+
+
+@router.post("/email/verify-token", response_model=TokenResponse)
+async def auth_email_verify_token(req: EmailVerifyTokenRequest):
+    """
+    Happy-path App Links: приложение поймало ссылку из письма напрямую
+    (https://api.bloomai.ru/auth/email/verify?token=...), извлекло token
+    и обменивает его сразу на JWT, минуя промежуточный код и браузер.
+
+    Токен одноразовый: гасим verified_at и exchanged_at одним UPDATE, поэтому
+    браузерный fallback (GET /email/verify, требующий verified_at IS NULL)
+    тот же токен уже не примет. Эти два пути взаимоисключающие: одну ссылку
+    обрабатывает либо приложение, либо браузер, но не оба.
+    """
+    token_hash = _hash_token(req.token)
+
+    db = await get_db()
+    async with db.pool.acquire() as conn:
+        await _ensure_email_tokens_table(conn)
+        row = await conn.fetchrow("""
+            UPDATE email_login_tokens
+            SET verified_at = CURRENT_TIMESTAMP,
+                exchanged_at = CURRENT_TIMESTAMP
+            WHERE token_hash = $1
+              AND verified_at IS NULL
+              AND token_expires_at > CURRENT_TIMESTAMP
+            RETURNING email
+        """, token_hash)
+
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Невалидная или просроченная ссылка",
+            )
+
+        email = row["email"]
+        user_id = await _find_or_create_user(
+            conn,
+            provider="email",
+            provider_user_id=email,
+            email=email,
+            first_name=None,
+        )
+
+    return TokenResponse(**create_tokens(user_id))
 
 
 @router.post("/email/exchange", response_model=TokenResponse)
