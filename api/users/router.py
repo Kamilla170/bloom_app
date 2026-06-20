@@ -113,7 +113,7 @@ async def update_profile(
     req: UpdateProfileRequest,
     user_id: int = Depends(get_current_user),
 ):
-    """Обновление профиля. Сейчас поддерживается смена аватара."""
+    """Обновление профиля: аватар и/или имя."""
     if req.avatar_preset_id is not None:
         if req.avatar_preset_id not in AVATAR_PRESETS:
             raise HTTPException(status_code=400, detail="Неизвестный аватар")
@@ -124,6 +124,17 @@ async def update_profile(
             await conn.execute(
                 "UPDATE users SET avatar_preset_id = $1 WHERE user_id = $2",
                 req.avatar_preset_id, user_id,
+            )
+
+        # Имя: пришла строка -> сохраняем (с обрезкой пробелов и длины).
+        # Пустая строка после трима -> сбрасываем в NULL, тогда приложение
+        # снова показывает заглушку "Пользователь".
+        if req.first_name is not None:
+            clean = req.first_name.strip()
+            new_name = clean[:50] if clean else None
+            await conn.execute(
+                "UPDATE users SET first_name = $1 WHERE user_id = $2",
+                new_name, user_id,
             )
 
         row = await conn.fetchrow("""
