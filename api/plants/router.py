@@ -6,7 +6,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, status
 from pydantic import BaseModel, Field
 from typing import Optional, List
 
@@ -35,6 +35,7 @@ from achievements import (
     check_and_unlock,
     increment_photo_count,
 )
+from api.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -184,7 +185,9 @@ async def get_plant(plant_id: int, user_id: int = Depends(get_current_user)):
 
 
 @router.post("/analyze", response_model=AnalysisResponse)
+@limiter.limit("20/minute")
 async def analyze_photo(
+    request: Request,
     photo: UploadFile = File(...),
     user_id: int = Depends(get_current_user),
 ):
@@ -495,7 +498,9 @@ async def _process_photo_update(
 
 
 @router.post("/{plant_id}/photo", response_model=PlantDetail)
+@limiter.limit("20/minute")
 async def update_plant_photo(
+    request: Request,
     plant_id: int,
     photo: UploadFile = File(...),
     user_id: int = Depends(get_current_user),
@@ -525,7 +530,9 @@ async def update_plant_photo(
 
 
 @router.post("/{plant_id}/chat-photo", response_model=ChatPhotoMessageOut)
+@limiter.limit("20/minute")
 async def send_chat_photo(
+    request: Request,
     plant_id: int,
     photo: UploadFile = File(...),
     user_id: int = Depends(get_current_user),
