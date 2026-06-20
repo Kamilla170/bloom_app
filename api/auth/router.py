@@ -8,7 +8,7 @@ import hashlib
 import secrets
 import logging
 import httpx
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
@@ -19,6 +19,7 @@ from api.schemas import (
 )
 from api.auth.jwt import create_tokens, decode_token
 from api.auth.email_service import send_login_email
+from api.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -226,7 +227,8 @@ async def _fetch_yandex_user_info(access_token: str) -> dict:
 
 
 @router.post("/yandex", response_model=TokenResponse)
-async def auth_yandex(req: YandexAuthRequest):
+@limiter.limit("20/minute")
+async def auth_yandex(request: Request, req: YandexAuthRequest):
     """
     Вход или регистрация через Yandex ID.
     Принимает authorization code, полученный мобильным клиентом из OAuth
@@ -273,11 +275,17 @@ async def auth_yandex(req: YandexAuthRequest):
 
 
 @router.post("/email/request", response_model=EmailLoginResponse)
-async def auth_email_request(req: EmailLoginRequest):
+@limiter.limit("10/hour")
+@limiter.limit("3/minute")
+async def auth_email_request(request: Request, req: EmailLoginRequest):
     """
     Шаг 1 magic-link: принять email, отправить письмо со ссылкой входа.
     Ответ одинаковый при любом исходе валидного запроса (не раскрываем,
     зарегистрирован адрес или нет).
+
+    Лимиты slowapi (по IP) защищают от перебора множества чужих адресов
+    с одного места. Лимиты ниже в БД (по конкретному адресу) защищают
+    конкретный ящик от спама. Это разные защиты, обе нужны.
     """
     email = req.email.strip().lower()
     if len(email) > 254 or not _EMAIL_RE.match(email):
@@ -378,7 +386,8 @@ class EmailVerifyTokenRequest(BaseModel):
 
 
 @router.post("/email/verify-token", response_model=TokenResponse)
-async def auth_email_verify_token(req: EmailVerifyTokenRequest):
+@limiter.limit("20/minute")
+async def auth_email_verify_token(request: Request, req: EmailVerifyTokenRequest):
     """
     Happy-path App Links: приложение поймало ссылку из письма напрямую
     (https://api.bloomai.ru/auth/email/verify?token=...), извлекло token
@@ -423,7 +432,8 @@ async def auth_email_verify_token(req: EmailVerifyTokenRequest):
 
 
 @router.post("/email/exchange", response_model=TokenResponse)
-async def auth_email_exchange(req: EmailExchangeRequest):
+@limiter.limit("20/minute")
+async def auth_email_exchange(request: Request, req: EmailExchangeRequest):
     """
     Шаг 3 magic-link: клиент обменивает код из deep link на JWT.
     """
@@ -461,7 +471,8 @@ async def auth_email_exchange(req: EmailExchangeRequest):
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh(req: RefreshRequest):
+@limiter.limit("30/minute")
+async def refresh(request: Request, req: RefreshRequest):
     """Обновление пары токенов по refresh_token"""
     payload = decode_token(req.refresh_token)
 
