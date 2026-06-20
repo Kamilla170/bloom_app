@@ -6,7 +6,7 @@ import json
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 
 from api.auth.dependencies import get_current_user
@@ -16,6 +16,7 @@ from services.subscription_service import check_limit, increment_usage
 from plant_memory import get_plant_context, save_interaction
 from database import get_db
 from api.services.storage_service import get_photo_url
+from api.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +144,9 @@ async def get_plant_chat_history(
 # ---------- Задать вопрос ----------
 
 @router.post("/question", response_model=QuestionResponse)
+@limiter.limit("20/minute")
 async def ask_question(
+    request: Request,
     req: QuestionRequest,
     user_id: int = Depends(get_current_user),
 ):
