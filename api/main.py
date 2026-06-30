@@ -44,6 +44,17 @@ async def run_app_migrations():
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMP")
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_version TEXT")
         logger.info("✅ Миграция: terms_accepted_at, terms_version")
+        # --- Маркетинговое согласие (ст. 18 38-ФЗ «О рекламе») ---
+        # Отдельный от 152-ФЗ тумблер «Новости и предложения». По умолчанию
+        # выключен. marketing_consent_at фиксирует момент включения как
+        # доказательство добровольного согласия на рекламные рассылки.
+        await conn.execute(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS marketing_consent BOOLEAN NOT NULL DEFAULT FALSE"
+        )
+        await conn.execute(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS marketing_consent_at TIMESTAMPTZ"
+        )
+        logger.info("✅ Миграция: marketing_consent")
         # --- Этап 9: Аналитика и достижения ---
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS total_photos INT DEFAULT 0")
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS global_watering_streak INT DEFAULT 0")
