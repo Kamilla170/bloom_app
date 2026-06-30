@@ -50,6 +50,7 @@ class UserProfile(BaseModel):
     total_waterings: int = 0
     questions_asked: int = 0
     avatar_preset_id: Optional[str] = None
+    marketing_consent: bool = False
 
 
 class UserSettings(BaseModel):
@@ -69,6 +70,9 @@ class UpdateProfileRequest(BaseModel):
     # Имя пользователь задаёт вручную в профиле. Пустая строка трактуется
     # как сброс имени (на бэке станет NULL, приложение покажет заглушку).
     first_name: Optional[str] = Field(None, max_length=50)
+    # Маркетинговое согласие (тумблер «Новости и предложения»). None означает
+    # «не менять», true/false включает или выключает рекламные рассылки.
+    marketing_consent: Optional[bool] = None
 
 
 # === ACHIEVEMENTS (компактное представление для тостов и для unseen) ===
