@@ -84,7 +84,7 @@ async def get_profile(user_id: int = Depends(get_current_user)):
         row = await conn.fetchrow("""
             SELECT user_id, email, first_name, created_at,
                    plants_count, total_waterings, questions_asked,
-                   avatar_preset_id
+                   avatar_preset_id, marketing_consent
             FROM users WHERE user_id = $1
         """, user_id)
 
@@ -105,6 +105,7 @@ async def get_profile(user_id: int = Depends(get_current_user)):
         total_waterings=row.get("total_waterings", 0),
         questions_asked=row.get("questions_asked", 0),
         avatar_preset_id=avatar_preset,
+        marketing_consent=row.get("marketing_consent", False),
     )
 
 
@@ -137,10 +138,26 @@ async def update_profile(
                 new_name, user_id,
             )
 
+        # Маркетинговое согласие (отдельный тумблер «Новости и предложения»).
+        # При включении фиксируем момент в marketing_consent_at как
+        # доказательство согласия. При выключении дату не трогаем (история).
+        if req.marketing_consent is not None:
+            if req.marketing_consent:
+                await conn.execute(
+                    "UPDATE users SET marketing_consent = TRUE, "
+                    "marketing_consent_at = NOW() WHERE user_id = $1",
+                    user_id,
+                )
+            else:
+                await conn.execute(
+                    "UPDATE users SET marketing_consent = FALSE WHERE user_id = $1",
+                    user_id,
+                )
+
         row = await conn.fetchrow("""
             SELECT user_id, email, first_name, created_at,
                    plants_count, total_waterings, questions_asked,
-                   avatar_preset_id
+                   avatar_preset_id, marketing_consent
             FROM users WHERE user_id = $1
         """, user_id)
 
@@ -156,6 +173,7 @@ async def update_profile(
         total_waterings=row.get("total_waterings", 0),
         questions_asked=row.get("questions_asked", 0),
         avatar_preset_id=row.get("avatar_preset_id"),
+        marketing_consent=row.get("marketing_consent", False),
     )
 
 
