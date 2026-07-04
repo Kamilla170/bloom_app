@@ -151,6 +151,23 @@ async def check_limit(user_id: int, action: str) -> Tuple[bool, Optional[Dict]]:
         return True, None
 
     if action == 'analyses':
+        # Бесплатные анализы доступны только пока пользователь ещё не добавил
+        # растение в коллекцию (пробует продукт). После добавления растения
+        # анализы на бесплатном плане доступны только по подписке.
+        async with db.pool.acquire() as conn:
+            plants_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM plants WHERE user_id = $1 AND plant_type = 'regular'",
+                user_id
+            )
+        if plants_count and plants_count > 0:
+            return False, {
+                "code": "limit_reached",
+                "limit_type": "analyses",
+                "message": _API_LIMIT_MESSAGES['analyses_plant_added'],
+                "limit": limit,
+                # Сброс по времени тут не поможет, доступ только по подписке
+                "resets_at": None,
+            }
         if usage['analyses_used'] >= limit:
             reset = usage.get('reset_date')
             return False, {
@@ -181,7 +198,8 @@ async def check_limit(user_id: int, action: str) -> Tuple[bool, Optional[Dict]]:
 # Длинный призыв к подписке юзер увидит уже на экране подписки.
 _API_LIMIT_MESSAGES = {
     'plants': "Достигнут лимит бесплатного плана: {limit} растение",
-    'analyses': "Достигнут лимит бесплатного плана: {limit} анализ фото в день",
+    'analyses': "Достигнут лимит бесплатного плана: {limit} анализов фото в день",
+    'analyses_plant_added': "Анализ фото на бесплатном плане доступен до добавления растения",
     'questions': "Достигнут лимит бесплатного плана: {limit} вопрос в день",
 }
 
