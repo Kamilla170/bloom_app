@@ -1,5 +1,5 @@
 """
-Эндпоинты авторизации: вход через провайдеров, magic-link по email, обновление токена
+Эндпоинты авторизации: вход через провайдеров, вход по коду на email, обновление токена
 """
 
 import os
@@ -9,16 +9,15 @@ import secrets
 import logging
 import httpx
 from fastapi import APIRouter, HTTPException, Request, status
-from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from database import get_db
 from api.schemas import (
     YandexAuthRequest, RefreshRequest, TokenResponse,
-    EmailLoginRequest, EmailLoginResponse, EmailExchangeRequest,
+    EmailLoginRequest, EmailLoginResponse,
 )
 from api.auth.jwt import create_tokens, decode_token
-from api.auth.email_service import send_login_email
+from api.auth.email_service import send_login_code_email
 from api.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
@@ -32,21 +31,16 @@ APP_USER_ID_START = 5_000_000_000
 YANDEX_CLIENT_ID = os.getenv("YANDEX_CLIENT_ID")
 YANDEX_CLIENT_SECRET = os.getenv("YANDEX_CLIENT_SECRET")
 
-# === Magic-link по email ===
-# Публичный адрес API (попадает в ссылку письма) и схема возврата в приложение
-PUBLIC_API_BASE = os.getenv("PUBLIC_API_BASE", "https://api.bloomai.ru").rstrip("/")
-APP_EMAIL_CALLBACK = "bloomai://oauth/email/callback"
-
-EMAIL_TOKEN_TTL_MINUTES = 15          # срок жизни ссылки из письма
-EMAIL_CODE_TTL_MINUTES = 5            # срок жизни кода для обмена на JWT
-EMAIL_RATELIMIT_PER_HOUR = 5          # макс. запросов на один адрес в час
+# === Вход по коду на email ===
+EMAIL_CODE_TTL_MINUTES = 10            # срок жизни кода из письма
+EMAIL_CODE_MAX_ATTEMPTS = 5            # макс. попыток ввода одного кода
+EMAIL_RATELIMIT_PER_HOUR = 5           # макс. запросов кода на один адрес в час
 EMAIL_RATELIMIT_COOLDOWN_SECONDS = 60  # не чаще одного запроса в минуту
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 # Таблица создаётся лениво при первом обращении (одна попытка на процесс).
-# Если захочешь, перенесём это в стартовые миграции, покажи main.py / database.py.
-_email_table_ready = False
+_email_codes_table_ready = False
 
 
 async def _get_next_app_user_id(conn) -> int:
@@ -109,40 +103,43 @@ async def _find_or_create_user(
     return user_id
 
 
-# === Хелперы magic-link ===
+# === Хелперы входа по коду ===
 
-def _hash_token(value: str) -> str:
-    """SHA-256 хеш секрета (в БД храним только хеши, не сами токены)."""
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+def _hash_code(email: str, code: str) -> str:
+    """
+    SHA-256 хеш кода (в БД храним только хеши, не сами коды).
+    Email в составе хеша, чтобы одинаковые коды у разных адресов
+    давали разные хеши.
+    """
+    return hashlib.sha256(f"{email}:{code}".encode("utf-8")).hexdigest()
 
 
-async def _ensure_email_tokens_table(conn) -> None:
-    """Создаёт таблицу одноразовых токенов входа, если её ещё нет."""
-    global _email_table_ready
-    if _email_table_ready:
+def _generate_code() -> str:
+    """Случайный 6-значный код, допускаются ведущие нули."""
+    return f"{secrets.randbelow(1_000_000):06d}"
+
+
+async def _ensure_email_codes_table(conn) -> None:
+    """Создаёт таблицу кодов входа, если её ещё нет."""
+    global _email_codes_table_ready
+    if _email_codes_table_ready:
         return
     await conn.execute("""
-        CREATE TABLE IF NOT EXISTS email_login_tokens (
+        CREATE TABLE IF NOT EXISTS email_login_codes (
             id BIGSERIAL PRIMARY KEY,
             email TEXT NOT NULL,
-            token_hash TEXT NOT NULL UNIQUE,
-            code_hash TEXT UNIQUE,
+            code_hash TEXT NOT NULL,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            token_expires_at TIMESTAMP NOT NULL,
-            code_expires_at TIMESTAMP,
-            verified_at TIMESTAMP,
-            exchanged_at TIMESTAMP
+            expires_at TIMESTAMP NOT NULL,
+            used_at TIMESTAMP,
+            attempts INTEGER NOT NULL DEFAULT 0
         )
     """)
     await conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_email_login_token_hash
-        ON email_login_tokens (token_hash)
+        CREATE INDEX IF NOT EXISTS idx_email_login_codes_email
+        ON email_login_codes (email)
     """)
-    await conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_email_login_code_hash
-        ON email_login_tokens (code_hash)
-    """)
-    _email_table_ready = True
+    _email_codes_table_ready = True
 
 
 async def _exchange_yandex_code_for_token(code: str) -> str:
@@ -279,7 +276,7 @@ async def auth_yandex(request: Request, req: YandexAuthRequest):
 @limiter.limit("3/minute")
 async def auth_email_request(request: Request, req: EmailLoginRequest):
     """
-    Шаг 1 magic-link: принять email, отправить письмо со ссылкой входа.
+    Шаг 1 входа по коду: принять email, отправить письмо с 6-значным кодом.
     Ответ одинаковый при любом исходе валидного запроса (не раскрываем,
     зарегистрирован адрес или нет).
 
@@ -293,11 +290,11 @@ async def auth_email_request(request: Request, req: EmailLoginRequest):
 
     db = await get_db()
     async with db.pool.acquire() as conn:
-        await _ensure_email_tokens_table(conn)
+        await _ensure_email_codes_table(conn)
 
         # Антиспам по адресу
-        hour_count = await conn.fetchval(f"""
-            SELECT COUNT(*) FROM email_login_tokens
+        hour_count = await conn.fetchval("""
+            SELECT COUNT(*) FROM email_login_codes
             WHERE email = $1
               AND created_at > CURRENT_TIMESTAMP - INTERVAL '1 hour'
         """, email)
@@ -308,7 +305,7 @@ async def auth_email_request(request: Request, req: EmailLoginRequest):
             )
 
         cooldown_count = await conn.fetchval(f"""
-            SELECT COUNT(*) FROM email_login_tokens
+            SELECT COUNT(*) FROM email_login_codes
             WHERE email = $1
               AND created_at > CURRENT_TIMESTAMP
                   - INTERVAL '{EMAIL_RATELIMIT_COOLDOWN_SECONDS} seconds'
@@ -316,149 +313,121 @@ async def auth_email_request(request: Request, req: EmailLoginRequest):
         if cooldown_count and cooldown_count >= 1:
             raise HTTPException(
                 status_code=429,
-                detail="Письмо уже отправлено, подождите минуту",
+                detail="Код уже отправлен, подождите минуту",
             )
 
-        token = secrets.token_urlsafe(32)
-        token_hash = _hash_token(token)
+        code = _generate_code()
+        code_hash = _hash_code(email, code)
+
+        # Гасим предыдущие активные коды адреса: действует только последний
+        await conn.execute("""
+            UPDATE email_login_codes
+            SET used_at = CURRENT_TIMESTAMP
+            WHERE email = $1 AND used_at IS NULL
+        """, email)
 
         await conn.execute(f"""
-            INSERT INTO email_login_tokens (email, token_hash, token_expires_at)
+            INSERT INTO email_login_codes (email, code_hash, expires_at)
             VALUES ($1, $2,
-                    CURRENT_TIMESTAMP + INTERVAL '{EMAIL_TOKEN_TTL_MINUTES} minutes')
-        """, email, token_hash)
-
-    link = f"{PUBLIC_API_BASE}/auth/email/verify?token={token}"
+                    CURRENT_TIMESTAMP + INTERVAL '{EMAIL_CODE_TTL_MINUTES} minutes')
+        """, email, code_hash)
 
     try:
-        await send_login_email(email, link)
+        await send_login_code_email(email, code)
     except Exception as e:  # noqa: BLE001
-        logger.error(f"Не удалось отправить письмо входа на {email}: {e}")
+        logger.error(f"Не удалось отправить письмо с кодом на {email}: {e}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Не удалось отправить письмо, попробуйте позже",
         )
 
-    return EmailLoginResponse(success=True, message="Письмо со ссылкой отправлено")
+    return EmailLoginResponse(success=True, message="Код отправлен")
 
 
-@router.get("/email/verify")
-async def auth_email_verify(token: str):
+class EmailVerifyCodeRequest(BaseModel):
+    email: str
+    code: str
+
+
+@router.post("/email/verify-code", response_model=TokenResponse)
+@limiter.limit("10/minute")
+async def auth_email_verify_code(request: Request, req: EmailVerifyCodeRequest):
     """
-    Шаг 2 magic-link: юзер открыл ссылку из письма.
-    Гасим токен, выдаём короткий код и 302-редиректом возвращаем в приложение.
+    Шаг 2 входа по коду: клиент присылает email и код из письма,
+    получает JWT. Код одноразовый, максимум EMAIL_CODE_MAX_ATTEMPTS
+    попыток ввода, после чего нужно запрашивать новый.
     """
-    token_hash = _hash_token(token)
+    email = req.email.strip().lower()
+    code = req.code.strip()
 
-    code = secrets.token_urlsafe(32)
-    code_hash = _hash_token(code)
-
-    db = await get_db()
-    async with db.pool.acquire() as conn:
-        await _ensure_email_tokens_table(conn)
-        # Атомарно: гасим токен и записываем код только если токен валиден
-        row = await conn.fetchrow(f"""
-            UPDATE email_login_tokens
-            SET verified_at = CURRENT_TIMESTAMP,
-                code_hash = $2,
-                code_expires_at = CURRENT_TIMESTAMP
-                    + INTERVAL '{EMAIL_CODE_TTL_MINUTES} minutes'
-            WHERE token_hash = $1
-              AND verified_at IS NULL
-              AND token_expires_at > CURRENT_TIMESTAMP
-            RETURNING id
-        """, token_hash, code_hash)
-
-    if row is None:
-        return RedirectResponse(
-            url=f"{APP_EMAIL_CALLBACK}?error=invalid_or_expired",
-            status_code=302,
+    if not _EMAIL_RE.match(email) or not code.isdigit() or len(code) != 6:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Неверный код",
         )
 
-    return RedirectResponse(
-        url=f"{APP_EMAIL_CALLBACK}?code={code}",
-        status_code=302,
-    )
-
-
-class EmailVerifyTokenRequest(BaseModel):
-    token: str
-
-
-@router.post("/email/verify-token", response_model=TokenResponse)
-@limiter.limit("20/minute")
-async def auth_email_verify_token(request: Request, req: EmailVerifyTokenRequest):
-    """
-    Happy-path App Links: приложение поймало ссылку из письма напрямую
-    (https://api.bloomai.ru/auth/email/verify?token=...), извлекло token
-    и обменивает его сразу на JWT, минуя промежуточный код и браузер.
-
-    Токен одноразовый: гасим verified_at и exchanged_at одним UPDATE, поэтому
-    браузерный fallback (GET /email/verify, требующий verified_at IS NULL)
-    тот же токен уже не примет. Эти два пути взаимоисключающие: одну ссылку
-    обрабатывает либо приложение, либо браузер, но не оба.
-    """
-    token_hash = _hash_token(req.token)
+    code_hash = _hash_code(email, code)
 
     db = await get_db()
     async with db.pool.acquire() as conn:
-        await _ensure_email_tokens_table(conn)
+        await _ensure_email_codes_table(conn)
+
+        # Берём последний активный код этого адреса
         row = await conn.fetchrow("""
-            UPDATE email_login_tokens
-            SET verified_at = CURRENT_TIMESTAMP,
-                exchanged_at = CURRENT_TIMESTAMP
-            WHERE token_hash = $1
-              AND verified_at IS NULL
-              AND token_expires_at > CURRENT_TIMESTAMP
-            RETURNING email
-        """, token_hash)
+            SELECT id, code_hash, attempts
+            FROM email_login_codes
+            WHERE email = $1
+              AND used_at IS NULL
+              AND expires_at > CURRENT_TIMESTAMP
+            ORDER BY created_at DESC
+            LIMIT 1
+        """, email)
 
         if row is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Невалидная или просроченная ссылка",
+                detail="Код не найден или истёк. Запросите новый.",
             )
 
-        email = row["email"]
-        user_id = await _find_or_create_user(
-            conn,
-            provider="email",
-            provider_user_id=email,
-            email=email,
-            first_name=None,
-        )
-
-    return TokenResponse(**create_tokens(user_id))
-
-
-@router.post("/email/exchange", response_model=TokenResponse)
-@limiter.limit("20/minute")
-async def auth_email_exchange(request: Request, req: EmailExchangeRequest):
-    """
-    Шаг 3 magic-link: клиент обменивает код из deep link на JWT.
-    """
-    code_hash = _hash_token(req.code)
-
-    db = await get_db()
-    async with db.pool.acquire() as conn:
-        await _ensure_email_tokens_table(conn)
-        # Атомарно гасим код и забираем email
-        row = await conn.fetchrow("""
-            UPDATE email_login_tokens
-            SET exchanged_at = CURRENT_TIMESTAMP
-            WHERE code_hash = $1
-              AND exchanged_at IS NULL
-              AND code_expires_at > CURRENT_TIMESTAMP
-            RETURNING email
-        """, code_hash)
-
-        if row is None:
+        if row["attempts"] >= EMAIL_CODE_MAX_ATTEMPTS:
+            # На всякий случай: гасим и просим новый
+            await conn.execute(
+                "UPDATE email_login_codes SET used_at = CURRENT_TIMESTAMP WHERE id = $1",
+                row["id"],
+            )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Невалидный или просроченный код",
+                detail="Слишком много попыток. Запросите новый код.",
             )
 
-        email = row["email"]
+        if code_hash != row["code_hash"]:
+            attempts = row["attempts"] + 1
+            if attempts >= EMAIL_CODE_MAX_ATTEMPTS:
+                # Последняя неудачная попытка: гасим код
+                await conn.execute("""
+                    UPDATE email_login_codes
+                    SET attempts = $2, used_at = CURRENT_TIMESTAMP
+                    WHERE id = $1
+                """, row["id"], attempts)
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Слишком много попыток. Запросите новый код.",
+                )
+            await conn.execute(
+                "UPDATE email_login_codes SET attempts = $2 WHERE id = $1",
+                row["id"], attempts,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Неверный код",
+            )
+
+        # Код верный: гасим и логиним
+        await conn.execute(
+            "UPDATE email_login_codes SET used_at = CURRENT_TIMESTAMP WHERE id = $1",
+            row["id"],
+        )
+
         user_id = await _find_or_create_user(
             conn,
             provider="email",
