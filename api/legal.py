@@ -11,10 +11,27 @@
     https://<твой-домен>/terms
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
 
+from database import get_db
+from api.auth.dependencies import get_current_user
+
 router = APIRouter()
+
+# Версия юридических документов. Совпадает с датой редакции на страницах ниже.
+# При изменении документов: обновить тексты, дату редакции и эту константу.
+# У пользователей при следующем входе запишется согласие с новой версией.
+LEGAL_DOCS_VERSION = "2026-06-25"
+
+# Какие документы фиксируем при входе: политика, соглашение и согласие на
+# обработку ПДн (даётся при регистрации или входе, см. /consent).
+# Маркетинговое согласие сюда не входит: оно добровольное и управляется
+# отдельным тумблером в профиле.
+_CONSENT_DOC_TYPES = ("privacy", "terms", "pdn_consent")
+
+# Таблица создаётся лениво при первом обращении (одна попытка на процесс).
+_consents_table_ready = False
 
 
 _PAGE_STYLE = """
@@ -312,3 +329,44 @@ async def consent() -> str:
 @router.get("/marketing-consent", response_class=HTMLResponse)
 async def marketing_consent() -> str:
     return _render("Согласие на получение рекламных материалов — Bloom", _MARKETING_BODY)
+
+
+async def _ensure_consents_table(conn) -> None:
+    """Создаёт таблицу зафиксированных согласий, если её ещё нет."""
+    global _consents_table_ready
+    if _consents_table_ready:
+        return
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS user_legal_consents (
+            id BIGSERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL,
+            doc_type TEXT NOT NULL,
+            doc_version TEXT NOT NULL,
+            accepted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (user_id, doc_type, doc_version)
+        )
+    """)
+    _consents_table_ready = True
+
+
+@router.post("/legal/consent")
+async def record_legal_consent(user_id: int = Depends(get_current_user)):
+    """
+    Фиксация факта согласия с юридическими документами (152-ФЗ).
+
+    Вызывается приложением после успешного входа. Чекбокс согласия на экране
+    входа обязателен для любой кнопки входа, поэтому сам вход означает
+    согласие; здесь сохраняем дату и версию документов, чтобы факт можно было
+    подтвердить. Повторные вызовы с той же версией дублей не создают, время
+    первого согласия с версией сохраняется.
+    """
+    db = await get_db()
+    async with db.pool.acquire() as conn:
+        await _ensure_consents_table(conn)
+        for doc_type in _CONSENT_DOC_TYPES:
+            await conn.execute("""
+                INSERT INTO user_legal_consents (user_id, doc_type, doc_version)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (user_id, doc_type, doc_version) DO NOTHING
+            """, user_id, doc_type, LEGAL_DOCS_VERSION)
+    return {"success": True, "version": LEGAL_DOCS_VERSION}
