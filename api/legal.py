@@ -12,7 +12,7 @@
 """
 
 from fastapi import APIRouter, Depends
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from database import get_db
 from api.auth.dependencies import get_current_user
@@ -347,6 +347,33 @@ async def _ensure_consents_table(conn) -> None:
         )
     """)
     _consents_table_ready = True
+
+
+# === App Links (Digital Asset Links) ===
+# Подтверждение для Android, что https-ссылки api.bloomai.ru можно открывать
+# сразу в приложении ru.bloomai.app (возврат из Yandex OAuth). Android
+# запрашивает этот файл при установке приложения и сверяет отпечаток подписи.
+# Отпечатки: релизный ключ (сборка для RuStore) и debug-ключ (тестовые сборки).
+_ASSETLINKS = [
+    {
+        "relation": ["delegate_permission/common.handle_all_urls"],
+        "target": {
+            "namespace": "android_app",
+            "package_name": "ru.bloomai.app",
+            "sha256_cert_fingerprints": [
+                # release: D:/docs/bloom-release.jks, alias bloom
+                "5D:0B:7A:C9:DA:79:8D:44:89:99:78:53:E6:8E:5A:64:55:C4:A2:AD:2B:F9:67:5B:8D:54:03:0B:DC:60:08:CA",
+                # debug: стандартный debug.keystore
+                "45:2A:9C:93:46:F9:02:A0:76:2D:89:5F:28:3E:F4:96:6C:19:E2:D8:D0:23:E4:73:2E:5F:3D:23:51:FD:51:3A",
+            ],
+        },
+    }
+]
+
+
+@router.get("/.well-known/assetlinks.json")
+async def assetlinks() -> JSONResponse:
+    return JSONResponse(content=_ASSETLINKS)
 
 
 @router.post("/legal/consent")
