@@ -1,6 +1,6 @@
 """
 Отправка писем через Yandex Cloud Postbox (SES v2 API).
-Используется для magic-link входа по email.
+Используется для входа по коду из email.
 """
 
 from __future__ import annotations
@@ -41,40 +41,40 @@ def _get_client():
     return _client
 
 
-def _build_login_email(link: str) -> tuple[str, str, str]:
-    """Возвращает (subject, text, html) письма со ссылкой входа."""
-    subject = "Вход в Bloom AI"
+def _build_login_code_email(code: str) -> tuple[str, str, str]:
+    """Возвращает (subject, text, html) письма с кодом входа."""
+    subject = "Код для входа в Bloom AI"
     text = (
         "Здравствуйте!\n\n"
-        "Чтобы войти в Bloom AI, откройте ссылку:\n"
-        f"{link}\n\n"
-        "Ссылка действует 15 минут и работает один раз.\n"
+        f"Ваш код для входа в Bloom AI: {code}\n\n"
+        "Код действует 10 минут.\n"
+        "Никому не сообщайте этот код.\n"
         "Если вы не запрашивали вход, просто проигнорируйте это письмо."
     )
     html = f"""\
 <div style="font-family: Arial, Helvetica, sans-serif; font-size: 16px; color: #2b3629; max-width: 480px; margin: 0 auto;">
   <p>Здравствуйте!</p>
-  <p>Чтобы войти в Bloom AI, нажмите кнопку ниже.</p>
+  <p>Ваш код для входа в Bloom AI:</p>
   <p style="margin: 28px 0;">
-    <a href="{link}"
-       style="display: inline-block; background: #009850; color: #ffffff;
-              text-decoration: none; padding: 14px 28px; border-radius: 28px;
-              font-weight: bold;">Войти в Bloom AI</a>
+    <span style="display: inline-block; background: #f6f7f6; color: #2b3629;
+                 border: 1px solid #e2e0d8; border-radius: 16px;
+                 padding: 14px 28px; font-size: 32px; font-weight: bold;
+                 letter-spacing: 8px; font-family: 'Courier New', monospace;">{code}</span>
   </p>
   <p style="color: #737a6f; font-size: 14px;">
-    Ссылка действует 15 минут и работает один раз.<br>
+    Код действует 10 минут. Никому не сообщайте этот код.<br>
     Если вы не запрашивали вход, просто проигнорируйте это письмо.
   </p>
 </div>"""
     return subject, text, html
 
 
-async def send_login_email(to_email: str, link: str) -> None:
+async def send_login_code_email(to_email: str, code: str) -> None:
     """
-    Отправляет письмо со ссылкой входа.
+    Отправляет письмо с кодом входа.
     Бросает исключение при ошибке отправки, вызывающий код решает, что показать.
     """
-    subject, text, html = _build_login_email(link)
+    subject, text, html = _build_login_code_email(code)
     client = _get_client()
 
     def _send():
@@ -94,5 +94,5 @@ async def send_login_email(to_email: str, link: str) -> None:
 
     resp = await run_in_threadpool(_send)
     logger.info(
-        f"📧 Письмо входа отправлено на {to_email}, MessageId={resp.get('MessageId')}"
+        f"📧 Письмо с кодом входа отправлено на {to_email}, MessageId={resp.get('MessageId')}"
     )
