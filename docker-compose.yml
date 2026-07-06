@@ -16,7 +16,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-
   api:
     build: .
     restart: unless-stopped
@@ -26,7 +25,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-
   dashboard:
     build: ./analytics
     restart: unless-stopped
@@ -36,7 +34,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-
   nginx:
     image: nginx:1.27-alpine
     restart: unless-stopped
@@ -50,12 +47,19 @@ services:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./certbot/www:/var/www/certbot:ro
       - ./certbot/conf:/etc/letsencrypt:ro
-
+    # Раз в 6 часов перечитываем конфиг, чтобы подхватить обновлённый
+    # сертификат без ручного рестарта. nginx работает на переднем плане.
+    command: "/bin/sh -c 'while :; do sleep 6h & wait $${!}; nginx -s reload; done & nginx -g \"daemon off;\"'"
   certbot:
     image: certbot/certbot
+    restart: unless-stopped
     volumes:
       - ./certbot/www:/var/www/certbot
       - ./certbot/conf:/etc/letsencrypt
-
+    # Раз в 12 часов пытаемся продлить сертификат. certbot renew сам ничего
+    # не делает, пока до истечения больше 30 дней, поэтому частые запуски
+    # безопасны. Метод (webroot) и домены берутся из renewal-конфига,
+    # сохранённого при первичном выпуске.
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
 volumes:
   pgdata:
