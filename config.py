@@ -26,7 +26,7 @@ ADMIN_USER_IDS = [455263261]
 
 FREE_LIMITS = {
     'plants': 1,
-    'analyses': 10,
+    'analyses': 4,
     'questions': 1,
 }
 
