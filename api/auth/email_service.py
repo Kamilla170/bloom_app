@@ -43,7 +43,7 @@ def _get_client():
 
 def _build_login_code_email(code: str) -> tuple[str, str, str]:
     """Возвращает (subject, text, html) письма с кодом входа."""
-    subject = "Код для входа в Bloom AI"
+    subject = f"{code} - код для входа в Bloom AI"
     text = (
         "Здравствуйте!\n\n"
         f"Ваш код для входа в Bloom AI: {code}\n\n"
