@@ -6,6 +6,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from api.auth.jwt import decode_token
+from config import ADMIN_USER_IDS
 
 security = HTTPBearer()
 
@@ -51,3 +52,13 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Невалидный user_id в токене",
         )
+
+
+async def require_admin(user_id: int = Depends(get_current_user)) -> int:
+    """Как get_current_user, но пускает только ADMIN_USER_IDS."""
+    if user_id not in ADMIN_USER_IDS:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Требуются права администратора",
+        )
+    return user_id
