@@ -168,3 +168,148 @@ async def revoke_discount(discount_id: int) -> bool:
         return int(result.split()[-1]) > 0
     except (ValueError, IndexError):
         return False
+
+
+# ======================= Автоправила (фаза 2) =======================
+#
+# Каждое правило — SELECT, возвращающий user_id подходящих под критерии.
+# Общие гарды во всех: не активный Pro; кулдаун (не давали скидку недавно);
+# лимит 2 авто-скидки на юзера пожизненно (source <> 'manual'). Скидка новичкам
+# сюда НЕ входит — она всегда включена и считается на лету (см. выше).
+# Глубину/срок берём НЕ отсюда, а из таблицы discount_rules (тюнинг из админки).
+
+ELIGIBILITY_SQL = {
+    # Начал оплату, но не завершил, и до сих пор free.
+    "abandoned_checkout": """
+        SELECT DISTINCT p.user_id AS user_id
+        FROM payments p
+        WHERE p.status IN ('pending', 'canceled', 'waiting_for_capture')
+          AND p.created_at > NOW() - INTERVAL '3 days'
+          AND p.created_at < NOW() - INTERVAL '2 hours'
+          AND NOT EXISTS (SELECT 1 FROM payments ps
+                          WHERE ps.user_id = p.user_id AND ps.status = 'succeeded')
+          AND NOT EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id = p.user_id
+                          AND s.plan = 'pro' AND (s.expires_at IS NULL OR s.expires_at > NOW()))
+          AND NOT EXISTS (SELECT 1 FROM discounts d WHERE d.user_id = p.user_id
+                          AND d.created_at > NOW() - INTERVAL '30 days')
+          AND (SELECT COUNT(*) FROM discounts dc WHERE dc.user_id = p.user_id
+               AND dc.source <> 'manual') < 2
+    """,
+    # Активный free-юзер, много раз возвращавшийся к ИИ (лимит 1/день →
+    # questions_asked ≈ число дней с упором в пейвол).
+    "repeated_paywall": """
+        SELECT u.user_id AS user_id
+        FROM users u
+        WHERE u.questions_asked >= 5
+          AND COALESCE(u.last_activity, u.created_at) > NOW() - INTERVAL '14 days'
+          AND NOT EXISTS (SELECT 1 FROM payments ps
+                          WHERE ps.user_id = u.user_id AND ps.status = 'succeeded')
+          AND NOT EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id = u.user_id
+                          AND s.plan = 'pro' AND (s.expires_at IS NULL OR s.expires_at > NOW()))
+          AND NOT EXISTS (SELECT 1 FROM discounts d WHERE d.user_id = u.user_id
+                          AND d.created_at > NOW() - INTERVAL '30 days')
+          AND (SELECT COUNT(*) FROM discounts dc WHERE dc.user_id = u.user_id
+               AND dc.source <> 'manual') < 2
+    """,
+    # Бывший платник (был succeeded-платёж), подписка истекла 3..60 дней назад.
+    "winback": """
+        SELECT u.user_id AS user_id
+        FROM users u
+        JOIN subscriptions s ON s.user_id = u.user_id
+        WHERE EXISTS (SELECT 1 FROM payments ps
+                      WHERE ps.user_id = u.user_id AND ps.status = 'succeeded')
+          AND s.expires_at IS NOT NULL
+          AND s.expires_at < NOW() - INTERVAL '3 days'
+          AND s.expires_at > NOW() - INTERVAL '60 days'
+          AND NOT EXISTS (SELECT 1 FROM discounts d WHERE d.user_id = u.user_id
+                          AND d.source = 'winback' AND d.created_at > NOW() - INTERVAL '90 days')
+          AND (SELECT COUNT(*) FROM discounts dc WHERE dc.user_id = u.user_id
+               AND dc.source <> 'manual') < 2
+    """,
+}
+
+
+async def get_rules() -> list[dict]:
+    """Конфиг автоправил (для админки)."""
+    db = await get_db()
+    async with db.pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT source, enabled, percent, duration_days, updated_at, updated_by "
+            "FROM discount_rules ORDER BY source"
+        )
+    return [dict(r) for r in rows]
+
+
+async def set_rule(
+    source: str,
+    enabled: Optional[bool] = None,
+    percent: Optional[int] = None,
+    duration_days: Optional[int] = None,
+    updated_by: Optional[int] = None,
+) -> bool:
+    """Обновить правило (только переданные поля). False, если source неизвестен."""
+    if source not in ELIGIBILITY_SQL:
+        return False
+    db = await get_db()
+    async with db.pool.acquire() as conn:
+        result = await conn.execute(
+            """
+            UPDATE discount_rules
+            SET enabled = COALESCE($2, enabled),
+                percent = COALESCE($3, percent),
+                duration_days = COALESCE($4, duration_days),
+                updated_by = COALESCE($5, updated_by),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE source = $1
+            """,
+            source, enabled, percent, duration_days, updated_by,
+        )
+    try:
+        return int(result.split()[-1]) > 0
+    except (ValueError, IndexError):
+        return False
+
+
+async def eligible_count(source: str) -> int:
+    """Сколько юзеров подходят под правило прямо сейчас (с учётом дедупа/кулдауна)."""
+    sql = ELIGIBILITY_SQL.get(source)
+    if not sql:
+        return 0
+    db = await get_db()
+    async with db.pool.acquire() as conn:
+        return (await conn.fetchval(f"SELECT COUNT(*) FROM ({sql}) sub")) or 0
+
+
+async def run_auto_discounts(only_source: Optional[str] = None) -> dict:
+    """
+    Прогнать включённые автоправила — выдать скидки подходящим (с holdout).
+    only_source — прогнать одно правило (например, сразу при включении в админке).
+    Возвращает {source: сколько выдано}.
+    """
+    result: dict = {}
+    for rule in await get_rules():
+        source = rule["source"]
+        if only_source and source != only_source:
+            continue
+        if not rule["enabled"]:
+            continue
+        sql = ELIGIBILITY_SQL.get(source)
+        if not sql:
+            continue
+        db = await get_db()
+        async with db.pool.acquire() as conn:
+            rows = await conn.fetch(sql)
+        granted = 0
+        for row in rows:
+            ok = await create_discount(
+                row["user_id"],
+                percent=rule["percent"],
+                days=rule["duration_days"],
+                source=source,
+                allow_holdout=True,
+            )
+            if ok:
+                granted += 1
+        result[source] = granted
+        logger.info(f"🏷️ auto-discount '{source}': кандидатов={len(rows)}, выдано={granted}")
+    return result

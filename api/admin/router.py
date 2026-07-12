@@ -15,6 +15,10 @@ from services.discount_service import (
     create_discount,
     list_active_discounts,
     revoke_discount,
+    get_rules,
+    set_rule,
+    eligible_count,
+    run_auto_discounts,
 )
 
 logger = logging.getLogger(__name__)
@@ -80,3 +84,51 @@ async def revoke_user_discount(
     if not ok:
         raise HTTPException(status_code=404, detail="Активная скидка не найдена")
     return SuccessResponse(message="Скидка отозвана")
+
+
+# ===================== Автоправила (вкл/выкл + счётчик) =====================
+
+
+@router.get("/discount-rules")
+async def list_discount_rules(admin_id: int = Depends(require_admin)):
+    """Автоправила со статусом, глубиной, сроком и числом подходящих сейчас."""
+    rules = []
+    for r in await get_rules():
+        rules.append({**r, "eligible_count": await eligible_count(r["source"])})
+    return {"rules": rules}
+
+
+class SetRuleRequest(BaseModel):
+    enabled: Optional[bool] = None
+    percent: Optional[int] = None
+    duration_days: Optional[int] = None
+
+
+@router.post("/discount-rules/{source}", response_model=SuccessResponse)
+async def update_discount_rule(
+    source: str,
+    req: SetRuleRequest,
+    admin_id: int = Depends(require_admin),
+):
+    """Вкл/выкл и тюнинг правила. При включении сразу прогоняет выдачу по нему."""
+    if req.percent is not None and not (1 <= req.percent <= 90):
+        raise HTTPException(status_code=400, detail="percent должен быть 1..90")
+    if req.duration_days is not None and req.duration_days <= 0:
+        raise HTTPException(status_code=400, detail="duration_days должен быть > 0")
+
+    ok = await set_rule(
+        source,
+        enabled=req.enabled,
+        percent=req.percent,
+        duration_days=req.duration_days,
+        updated_by=admin_id,
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail="Правило не найдено")
+
+    msg = f"Правило '{source}' обновлено"
+    if req.enabled:
+        # Немедленный прогон по текущему множеству («раз и включил на них»).
+        res = await run_auto_discounts(only_source=source)
+        msg += f", выдано сразу: {res.get(source, 0)}"
+    return SuccessResponse(message=msg)

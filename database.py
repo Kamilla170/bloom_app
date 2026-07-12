@@ -444,6 +444,27 @@ class PlantDatabase:
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_discounts_user_active ON discounts(user_id, expires_at)")
             await conn.execute("CREATE INDEX IF NOT EXISTS idx_discounts_source ON discounts(source, created_at DESC)")
 
+            # Конфиг автоправил скидок (вкл/выкл + глубина/срок). Управляется из
+            # админки. Скидка новичкам СЮДА НЕ входит — она всегда включена.
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS discount_rules (
+                    source        TEXT PRIMARY KEY,
+                    enabled       BOOLEAN NOT NULL DEFAULT FALSE,
+                    percent       INTEGER NOT NULL,
+                    duration_days INTEGER NOT NULL,
+                    updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_by    BIGINT
+                )
+            """)
+            # Сид трёх правил (выключены по умолчанию — включает админ).
+            await conn.execute("""
+                INSERT INTO discount_rules (source, enabled, percent, duration_days)
+                VALUES ('abandoned_checkout', FALSE, 20, 2),
+                       ('repeated_paywall',   FALSE, 25, 3),
+                       ('winback',            FALSE, 35, 7)
+                ON CONFLICT (source) DO NOTHING
+            """)
+
             # Добавляем новые колонки
             try:
                 await conn.execute("ALTER TABLE plants ADD COLUMN IF NOT EXISTS current_state TEXT DEFAULT 'healthy'")
