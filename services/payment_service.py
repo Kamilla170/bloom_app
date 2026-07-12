@@ -137,6 +137,7 @@ async def _maybe_grant_subscription(
     payment_id: str,
     user_id: int,
     yookassa_data: Optional[Dict] = None,
+    source: str = "polling_fallback",
 ):
     """
     Фоллбэк-выдача подписки при поллинге, если платёж succeeded, но подписка
@@ -197,11 +198,11 @@ async def _maybe_grant_subscription(
         payment_method_id=payment_method_id,
         plan_id=plan_id,
         payment_id=payment_id,
-        source="polling_fallback",
+        source=source,
     )
 
     logger.info(
-        f"✅ Подписка активирована (фоллбэк-поллинг): user_id={user_id}, "
+        f"✅ Подписка активирована ({source}): user_id={user_id}, "
         f"plan_id={plan_id}, план={plan_label}, expires={expires_at}"
     )
 
@@ -515,45 +516,43 @@ async def handle_payment_webhook(payload: dict) -> bool:
             )
 
         if event_type == "payment.succeeded" and status == "succeeded":
-            payment_method = payment_data.get("payment_method", {})
-            payment_method_id = None
-            if payment_method.get("saved"):
-                payment_method_id = payment_method.get("id")
-
-            async with db.pool.acquire() as conn:
-                await conn.execute(
-                    "UPDATE payments SET payment_method_id = $1, updated_at = CURRENT_TIMESTAMP WHERE payment_id = $2",
-                    payment_method_id, payment_id,
+            # БЕЗОПАСНОСТЬ: эндпоинт вебхука открыт и не проверяет подпись,
+            # поэтому телу запроса доверять НЕЛЬЗЯ — иначе кто угодно мог бы
+            # прислать поддельный payment.succeeded и получить PRO бесплатно.
+            # Перезапрашиваем платёж напрямую у YooKassa и выдаём подписку
+            # ТОЛЬКО если YooKassa подтверждает статус succeeded.
+            verified = await _fetch_payment_from_yookassa(payment_id)
+            if not verified or verified.get("status") != "succeeded":
+                real_status = verified.get("status") if verified else "нет данных"
+                logger.warning(
+                    f"⛔ Webhook {payment_id}: платёж НЕ подтверждён YooKassa "
+                    f"(статус: {real_status}) — выдача отклонена"
                 )
-
-            # Защита от двойной выдачи: занимаем платёж. Если фоллбэк-поллинг уже
-            # успел выдать подписку - claim вернёт False, и мы не задвоим.
-            claimed = await _try_claim_payment(payment_id)
-            if not claimed:
-                logger.info(
-                    f"ℹ️ Webhook: подписка за платёж {payment_id} уже выдана (фоллбэк успел), пропускаем"
+                await mark_webhook_processed(
+                    webhook_id, error="payment not verified with yookassa"
                 )
-                await mark_webhook_processed(webhook_id)
-                return True
+                return False
 
-            from services.subscription_service import activate_pro
-            expires_at = await activate_pro(
-                user_id,
-                days=days,
-                amount=amount,
-                payment_method_id=payment_method_id,
-                plan_id=plan_id,
-                payment_id=payment_id,
+            # user_id тоже берём из проверенных данных YooKassa, не из тела.
+            verified_meta = verified.get("metadata", {}) or {}
+            verified_user_id = verified_meta.get("user_id")
+            if not verified_user_id:
+                logger.warning(
+                    f"⚠️ Webhook {payment_id}: нет user_id в metadata YooKassa"
+                )
+                await mark_webhook_processed(
+                    webhook_id, error="no user_id in verified metadata"
+                )
+                return False
+
+            # Единый безопасный путь выдачи (claim от дублей + активация по
+            # данным YooKassa), тот же, что и фоллбэк-поллинг.
+            await _maybe_grant_subscription(
+                payment_id,
+                int(verified_user_id),
+                yookassa_data=verified,
                 source="yookassa_webhook",
             )
-
-            plan_label = metadata.get("plan_label", f"{days} дней")
-            logger.info(
-                f"✅ Подписка активирована: user_id={user_id}, plan_id={plan_id}, "
-                f"план={plan_label}, expires={expires_at}"
-            )
-
-            await _notify_user_payment_success(user_id, expires_at, plan_label)
             await mark_webhook_processed(webhook_id)
             return True
 
