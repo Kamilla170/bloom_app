@@ -47,6 +47,7 @@ services:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./certbot/www:/var/www/certbot:ro
       - ./certbot/conf:/etc/letsencrypt:ro
+      - ./site:/usr/share/nginx/site:ro
     # Раз в 6 часов перечитываем конфиг, чтобы подхватить обновлённый
     # сертификат без ручного рестарта. nginx работает на переднем плане.
     command: "/bin/sh -c 'while :; do sleep 6h & wait $${!}; nginx -s reload; done & nginx -g \"daemon off;\"'"
