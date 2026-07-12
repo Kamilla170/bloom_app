@@ -134,6 +134,17 @@ async def process_auto_payments_job():
         logger.error(f"❌ process_auto_payments_job: {e}", exc_info=True)
 
 
+async def auto_discounts_job():
+    """Раз в час — выдача скидок по включённым автоправилам."""
+    try:
+        from services.discount_service import run_auto_discounts
+        result = await run_auto_discounts()
+        if result:
+            logger.info(f"🏷️ Автоскидки: {result}")
+    except Exception as e:
+        logger.error(f"❌ auto_discounts_job: {e}", exc_info=True)
+
+
 def start_scheduler():
     """Запустить планировщик. Вызывается из api/main.py lifespan startup."""
     global _scheduler
@@ -167,10 +178,21 @@ def start_scheduler():
         coalesce=True,
     )
 
+    # Раз в час (в :15) — выдача скидок по включённым автоправилам
+    _scheduler.add_job(
+        auto_discounts_job,
+        trigger="cron",
+        minute=15,
+        id="auto_discounts",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
     _scheduler.start()
     logger.info(
-        "✅ Scheduler запущен: "
-        "auto_payments в 10:00 МСК (watering_reminders отключён, локальные пуши)"
+        "✅ Scheduler запущен: auto_payments в 10:00 МСК, "
+        "auto_discounts ежечасно (watering_reminders отключён, локальные пуши)"
     )
 
 
