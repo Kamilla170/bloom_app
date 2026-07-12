@@ -3,16 +3,45 @@ Bloom AI Analytics Dashboard.
 """
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from urllib.parse import quote
 
-from fastapi import FastAPI, Depends, Request
-from fastapi.responses import HTMLResponse
+import httpx
+from fastapi import FastAPI, Depends, Request, Form
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 import db
 from auth import require_auth
+
+# Дашборд — тонкий клиент: управление скидками идёт в основной API по HTTP с
+# сервисным ключом, чтобы вся логика (дедуп/holdout/цены) жила в одном месте.
+MAIN_API_URL = os.getenv("MAIN_API_URL", "https://api.bloomai.ru").rstrip("/")
+ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "")
+
+
+async def _admin_api_get(path: str):
+    async with httpx.AsyncClient(timeout=20) as client:
+        r = await client.get(
+            f"{MAIN_API_URL}{path}",
+            headers={"X-Admin-Key": ADMIN_API_KEY},
+        )
+        r.raise_for_status()
+        return r.json()
+
+
+async def _admin_api_post(path: str, payload: dict):
+    async with httpx.AsyncClient(timeout=20) as client:
+        r = await client.post(
+            f"{MAIN_API_URL}{path}",
+            headers={"X-Admin-Key": ADMIN_API_KEY},
+            json=payload,
+        )
+        r.raise_for_status()
+        return r.json()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -135,6 +164,68 @@ def _build_retention_triangle(rows: list[dict]) -> dict:
 @app.get("/healthz")
 async def healthz():
     return {"status": "ok"}
+
+
+# ===================== Скидки (тонкий прокси к основному API) =====================
+
+
+@app.get("/discounts", response_class=HTMLResponse)
+async def discounts_page(request: Request, _: str = Depends(require_auth)):
+    """Страница управления скидками: ручная выдача + автоправила с тумблерами."""
+    rules, error = [], None
+    if not ADMIN_API_KEY:
+        error = ("ADMIN_API_KEY не задан в окружении дашборда — управление скидками "
+                 "отключено. Задайте ADMIN_API_KEY (и MAIN_API_URL) и он же в основном API.")
+    else:
+        try:
+            data = await _admin_api_get("/admin/discount-rules")
+            rules = data.get("rules", [])
+        except Exception as e:
+            error = f"Не удалось загрузить правила из основного API: {e}"
+    return templates.TemplateResponse("discounts.html", {
+        "request": request,
+        "rules": rules,
+        "error": error,
+        "configured": bool(ADMIN_API_KEY),
+        "msg": request.query_params.get("msg"),
+        "err": request.query_params.get("err"),
+    })
+
+
+@app.post("/discounts/grant")
+async def discounts_grant(
+    _: str = Depends(require_auth),
+    user_ids: str = Form(...),
+    percent: int = Form(...),
+    days: int = Form(7),
+    label: str = Form(""),
+):
+    ids = [int(x) for x in user_ids.replace(",", " ").split() if x.strip().isdigit()]
+    if not ids:
+        return RedirectResponse("/discounts?err=Не+распознаны+user_ids", status_code=303)
+    try:
+        res = await _admin_api_post("/admin/discounts", {
+            "user_ids": ids, "percent": percent, "days": days,
+            "label": label or None,
+        })
+        return RedirectResponse(f"/discounts?msg={quote(res.get('message', 'OK'))}", status_code=303)
+    except Exception as e:
+        return RedirectResponse(f"/discounts?err={quote(str(e))}", status_code=303)
+
+
+@app.post("/discounts/rule/{source}")
+async def discounts_rule(
+    source: str,
+    _: str = Depends(require_auth),
+    enabled: str = Form(...),
+):
+    try:
+        res = await _admin_api_post(f"/admin/discount-rules/{source}", {
+            "enabled": (enabled == "on"),
+        })
+        return RedirectResponse(f"/discounts?msg={quote(res.get('message', 'OK'))}", status_code=303)
+    except Exception as e:
+        return RedirectResponse(f"/discounts?err={quote(str(e))}", status_code=303)
 
 
 @app.get("/", response_class=HTMLResponse)

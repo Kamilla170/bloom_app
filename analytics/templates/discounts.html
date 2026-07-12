@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bloom AI — Скидки</title>
+  <style>
+    :root { --bg:#0f1115; --card:#181b22; --line:#262b35; --txt:#e7e9ee; --mut:#9aa3b2; --acc:#009850; --danger:#e5484d; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--txt); font:15px/1.5 -apple-system,Segoe UI,Roboto,sans-serif; }
+    .wrap { max-width: 960px; margin: 0 auto; padding: 24px 16px 64px; }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    h2 { font-size: 16px; margin: 28px 0 12px; }
+    a { color: var(--acc); }
+    .sub { color: var(--mut); margin: 0 0 20px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; }
+    .banner { padding:12px 14px; border-radius:10px; margin-bottom:16px; font-size:14px; }
+    .banner.ok { background:rgba(0,152,80,.15); border:1px solid var(--acc); }
+    .banner.err { background:rgba(229,72,77,.14); border:1px solid var(--danger); }
+    .banner.warn { background:rgba(230,180,60,.14); border:1px solid #e6b43c; }
+    label { display:block; font-size:13px; color:var(--mut); margin:10px 0 4px; }
+    input, textarea { width:100%; background:#0f131a; border:1px solid var(--line); color:var(--txt);
+                      border-radius:8px; padding:9px 11px; font-size:14px; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; }
+    .row > div { flex:1; min-width:120px; }
+    button { background:var(--acc); color:#fff; border:0; border-radius:8px; padding:9px 16px;
+             font-size:14px; font-weight:600; cursor:pointer; }
+    button.ghost { background:transparent; border:1px solid var(--line); color:var(--txt); }
+    button.danger { background:transparent; border:1px solid var(--danger); color:var(--danger); }
+    table { width:100%; border-collapse:collapse; margin-top:6px; }
+    th, td { text-align:left; padding:10px 8px; border-bottom:1px solid var(--line); font-size:14px; vertical-align:middle; }
+    th { color:var(--mut); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+    .pill { display:inline-block; padding:2px 9px; border-radius:20px; font-size:12px; font-weight:600; }
+    .pill.on { background:rgba(0,152,80,.18); color:#3ddc8c; }
+    .pill.off { background:rgba(154,163,178,.16); color:var(--mut); }
+    .count { font-weight:700; font-size:16px; }
+    .muted { color:var(--mut); font-size:13px; }
+    form.inline { display:inline; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Скидки</h1>
+    <p class="sub"><a href="/">← Дашборд</a> · управление скидками (ручная выдача и автоправила)</p>
+
+    {% if msg %}<div class="banner ok">{{ msg }}</div>{% endif %}
+    {% if err %}<div class="banner err">{{ err }}</div>{% endif %}
+    {% if error %}<div class="banner warn">{{ error }}</div>{% endif %}
+
+    <!-- ============ Ручная выдача ============ -->
+    <h2>Ручная выдача</h2>
+    <div class="card">
+      <form method="post" action="/discounts/grant">
+        <label>user_id (через запятую или пробел)</label>
+        <textarea name="user_ids" rows="2" placeholder="123, 456 789" required></textarea>
+        <div class="row">
+          <div>
+            <label>Скидка, %</label>
+            <input name="percent" type="number" min="1" max="90" value="30" required>
+          </div>
+          <div>
+            <label>Дней действия</label>
+            <input name="days" type="number" min="1" value="7" required>
+          </div>
+          <div style="flex:2">
+            <label>Текст для баннера (необязательно)</label>
+            <input name="label" placeholder="Только для вас — 30%">
+          </div>
+        </div>
+        <div style="margin-top:14px">
+          <button type="submit" {% if not configured %}disabled{% endif %}>Выдать скидку</button>
+          <span class="muted">Уже имеющие активную скидку пропускаются.</span>
+        </div>
+      </form>
+    </div>
+
+    <!-- ============ Автоправила ============ -->
+    <h2>Автоправила</h2>
+    <div class="card">
+      {% if not rules %}
+        <p class="muted">Правила недоступны (см. сообщение выше).</p>
+      {% else %}
+      <table>
+        <thead>
+          <tr>
+            <th>Правило</th><th>Статус</th><th>Скидка</th><th>Срок</th>
+            <th>Подходят сейчас</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rules %}
+          <tr>
+            <td>
+              {% if r.source == 'winback' %}Win-back (бывший платник)
+              {% elif r.source == 'abandoned_checkout' %}Брошенный чекаут
+              {% elif r.source == 'repeated_paywall' %}Повторный упор в пейвол
+              {% else %}{{ r.source }}{% endif %}
+              <div class="muted">{{ r.source }}</div>
+            </td>
+            <td>
+              {% if r.enabled %}<span class="pill on">включено</span>
+              {% else %}<span class="pill off">выключено</span>{% endif %}
+            </td>
+            <td>{{ r.percent }}%</td>
+            <td>{{ r.duration_days }} дн.</td>
+            <td><span class="count">{{ r.eligible_count }}</span></td>
+            <td>
+              {% if r.enabled %}
+                <form class="inline" method="post" action="/discounts/rule/{{ r.source }}">
+                  <input type="hidden" name="enabled" value="off">
+                  <button class="ghost" type="submit">Выключить</button>
+                </form>
+              {% else %}
+                <form class="inline" method="post" action="/discounts/rule/{{ r.source }}">
+                  <input type="hidden" name="enabled" value="on">
+                  <button type="submit" {% if not configured %}disabled{% endif %}>Включить</button>
+                </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="muted" style="margin-top:14px">
+        «Подходят сейчас» — сколько юзеров получат скидку при включении (с учётом
+        дедупа и кулдауна). Включение сразу выдаёт скидку текущему множеству;
+        выключение останавливает только новые выдачи (уже выданные доживают срок).
+        20% подходящих идут в holdout (контроль) для замера эффекта.
+      </p>
+      {% endif %}
+    </div>
+  </div>
+</body>
+</html>

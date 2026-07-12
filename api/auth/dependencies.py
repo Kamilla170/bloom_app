@@ -2,7 +2,12 @@
 FastAPI зависимость для авторизации
 """
 
-from fastapi import Depends, HTTPException, status
+import os
+import secrets
+from typing import Optional
+
+from fastapi import Depends, HTTPException, status, Request, Header
+
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from api.auth.jwt import decode_token
@@ -54,11 +59,37 @@ async def get_current_user(
         )
 
 
-async def require_admin(user_id: int = Depends(get_current_user)) -> int:
-    """Как get_current_user, но пускает только ADMIN_USER_IDS."""
-    if user_id not in ADMIN_USER_IDS:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Требуются права администратора",
-        )
-    return user_id
+async def require_admin(
+    request: Request,
+    x_admin_key: Optional[str] = Header(default=None),
+) -> int:
+    """
+    Пропускает админа двумя путями:
+
+    1) Сервисный ключ `X-Admin-Key` == env `ADMIN_API_KEY` — для дашборда
+       (server-to-server). Работает ТОЛЬКО если ADMIN_API_KEY задан в окружении;
+       если не задан — этот путь полностью отключён (fail-closed). Возвращает 0
+       как id «системного» админа (пишется в created_by).
+    2) Access-JWT пользователя из `ADMIN_USER_IDS` — для ручных вызовов.
+
+    Не задан ключ и не админ-JWT → 403.
+    """
+    admin_key = os.getenv("ADMIN_API_KEY", "")
+    if admin_key and x_admin_key and secrets.compare_digest(x_admin_key, admin_key):
+        return 0
+
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        payload = decode_token(auth[len("Bearer "):])
+        if payload and payload.get("type") == "access":
+            try:
+                uid = int(payload.get("sub"))
+            except (TypeError, ValueError):
+                uid = None
+            if uid is not None and uid in ADMIN_USER_IDS:
+                return uid
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Требуются права администратора",
+    )
