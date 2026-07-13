@@ -84,7 +84,7 @@
         <thead>
           <tr>
             <th>Правило</th><th>Статус</th><th>Скидка</th><th>Срок</th>
-            <th>Подходят сейчас</th><th></th>
+            <th>Подходят сейчас</th><th>Действие</th>
           </tr>
         </thead>
         <tbody>
@@ -114,9 +114,11 @@
               {% else %}
                 <form class="inline" method="post" action="/discounts/rule/{{ r.source }}">
                   <input type="hidden" name="enabled" value="on">
+                  <span class="muted" style="margin-right:4px">на</span>
                   <input type="number" name="enable_days" min="0" value="3"
-                         title="Через сколько дней само выключится (0 = вручную)"
-                         style="width:56px; margin-right:6px; display:inline-block">
+                         title="Через сколько дней само выключится (0 = держать вручную)"
+                         style="width:52px; display:inline-block">
+                  <span class="muted" style="margin:0 8px 0 4px">дн.</span>
                   <button type="submit" {% if not configured %}disabled{% endif %}>Включить</button>
                 </form>
               {% endif %}
