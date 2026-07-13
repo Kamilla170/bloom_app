@@ -173,9 +173,10 @@ async def revoke_discount(discount_id: int) -> bool:
 # ======================= Автоправила (фаза 2) =======================
 #
 # Каждое правило — SELECT, возвращающий user_id подходящих под критерии.
-# Общие гарды во всех: не активный Pro; нет активной скидки (не стакаем две живые);
-# лимит 2 авто-скидки на юзера пожизненно (source <> 'manual'). Скидка новичкам
-# сюда НЕ входит — она всегда включена и считается на лету (см. выше).
+# Общие гарды во всех: не активный Pro; нет активной скидки (не стакаем две живые).
+# Ни кулдауна, ни лимита на число скидок — частоту регулируешь включением/выключением
+# правила вручную (иначе, оставив правило включённым, юзер будет получать скидку
+# снова при каждом истечении). Скидка новичкам сюда НЕ входит — всегда включена.
 # Глубину/срок берём НЕ отсюда, а из таблицы discount_rules (тюнинг из админки).
 
 ELIGIBILITY_SQL = {
@@ -192,8 +193,6 @@ ELIGIBILITY_SQL = {
                           AND s.plan = 'pro' AND (s.expires_at IS NULL OR s.expires_at > NOW()))
           AND NOT EXISTS (SELECT 1 FROM discounts d WHERE d.user_id = p.user_id
                           AND d.expires_at > NOW())
-          AND (SELECT COUNT(*) FROM discounts dc WHERE dc.user_id = p.user_id
-               AND dc.source <> 'manual') < 2
     """,
     # Активный free-юзер, много раз возвращавшийся к ИИ (лимит 1/день →
     # questions_asked ≈ число дней с упором в пейвол).
@@ -208,8 +207,6 @@ ELIGIBILITY_SQL = {
                           AND s.plan = 'pro' AND (s.expires_at IS NULL OR s.expires_at > NOW()))
           AND NOT EXISTS (SELECT 1 FROM discounts d WHERE d.user_id = u.user_id
                           AND d.expires_at > NOW())
-          AND (SELECT COUNT(*) FROM discounts dc WHERE dc.user_id = u.user_id
-               AND dc.source <> 'manual') < 2
     """,
     # Бывший платник (был succeeded-платёж), подписка истекла 3..60 дней назад.
     "winback": """
@@ -223,8 +220,6 @@ ELIGIBILITY_SQL = {
           AND s.expires_at > NOW() - INTERVAL '60 days'
           AND NOT EXISTS (SELECT 1 FROM discounts d WHERE d.user_id = u.user_id
                           AND d.expires_at > NOW())
-          AND (SELECT COUNT(*) FROM discounts dc WHERE dc.user_id = u.user_id
-               AND dc.source <> 'manual') < 2
     """,
 }
 
