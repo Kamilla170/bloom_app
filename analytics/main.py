@@ -176,15 +176,20 @@ async def discounts_page(request: Request, _: str = Depends(require_auth)):
     if not ADMIN_API_KEY:
         error = ("ADMIN_API_KEY не задан в окружении дашборда — управление скидками "
                  "отключено. Задайте ADMIN_API_KEY (и MAIN_API_URL) и он же в основном API.")
-    else:
+    users = []
+    if ADMIN_API_KEY:
         try:
-            data = await _admin_api_get("/admin/discount-rules")
-            rules = data.get("rules", [])
+            rules = (await _admin_api_get("/admin/discount-rules")).get("rules", [])
         except Exception as e:
             error = f"Не удалось загрузить правила из основного API: {e}"
+        try:
+            users = (await _admin_api_get("/admin/users")).get("users", [])
+        except Exception as e:
+            error = error or f"Не удалось загрузить юзеров: {e}"
     return templates.TemplateResponse("discounts.html", {
         "request": request,
         "rules": rules,
+        "users": users,
         "error": error,
         "configured": bool(ADMIN_API_KEY),
         "msg": request.query_params.get("msg"),
@@ -195,17 +200,24 @@ async def discounts_page(request: Request, _: str = Depends(require_auth)):
 @app.post("/discounts/grant")
 async def discounts_grant(
     _: str = Depends(require_auth),
-    user_ids: str = Form(...),
+    pick: list[str] = Form(default=[]),   # отмеченные чекбоксами user_id
+    manual_ids: str = Form(""),           # запасной ручной ввод
     percent: int = Form(...),
     days: int = Form(7),
     label: str = Form(""),
 ):
-    ids = [int(x) for x in user_ids.replace(",", " ").split() if x.strip().isdigit()]
+    ids = set()
+    for x in pick:
+        if x.strip().isdigit():
+            ids.add(int(x))
+    for x in manual_ids.replace(",", " ").split():
+        if x.strip().isdigit():
+            ids.add(int(x))
     if not ids:
-        return RedirectResponse("/discounts?err=Не+распознаны+user_ids", status_code=303)
+        return RedirectResponse("/discounts?err=Никто+не+выбран", status_code=303)
     try:
         res = await _admin_api_post("/admin/discounts", {
-            "user_ids": ids, "percent": percent, "days": days,
+            "user_ids": sorted(ids), "percent": percent, "days": days,
             "label": label or None,
         })
         return RedirectResponse(f"/discounts?msg={quote(res.get('message', 'OK'))}", status_code=303)
