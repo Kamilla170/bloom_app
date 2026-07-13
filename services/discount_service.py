@@ -173,7 +173,7 @@ async def revoke_discount(discount_id: int) -> bool:
 # ======================= Автоправила (фаза 2) =======================
 #
 # Каждое правило — SELECT, возвращающий user_id подходящих под критерии.
-# Общие гарды во всех: не активный Pro; кулдаун (не давали скидку недавно);
+# Общие гарды во всех: не активный Pro; нет активной скидки (не стакаем две живые);
 # лимит 2 авто-скидки на юзера пожизненно (source <> 'manual'). Скидка новичкам
 # сюда НЕ входит — она всегда включена и считается на лету (см. выше).
 # Глубину/срок берём НЕ отсюда, а из таблицы discount_rules (тюнинг из админки).
@@ -191,7 +191,7 @@ ELIGIBILITY_SQL = {
           AND NOT EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id = p.user_id
                           AND s.plan = 'pro' AND (s.expires_at IS NULL OR s.expires_at > NOW()))
           AND NOT EXISTS (SELECT 1 FROM discounts d WHERE d.user_id = p.user_id
-                          AND d.created_at > NOW() - INTERVAL '30 days')
+                          AND d.expires_at > NOW())
           AND (SELECT COUNT(*) FROM discounts dc WHERE dc.user_id = p.user_id
                AND dc.source <> 'manual') < 2
     """,
@@ -207,7 +207,7 @@ ELIGIBILITY_SQL = {
           AND NOT EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id = u.user_id
                           AND s.plan = 'pro' AND (s.expires_at IS NULL OR s.expires_at > NOW()))
           AND NOT EXISTS (SELECT 1 FROM discounts d WHERE d.user_id = u.user_id
-                          AND d.created_at > NOW() - INTERVAL '30 days')
+                          AND d.expires_at > NOW())
           AND (SELECT COUNT(*) FROM discounts dc WHERE dc.user_id = u.user_id
                AND dc.source <> 'manual') < 2
     """,
@@ -222,7 +222,7 @@ ELIGIBILITY_SQL = {
           AND s.expires_at < NOW() - INTERVAL '3 days'
           AND s.expires_at > NOW() - INTERVAL '60 days'
           AND NOT EXISTS (SELECT 1 FROM discounts d WHERE d.user_id = u.user_id
-                          AND d.source = 'winback' AND d.created_at > NOW() - INTERVAL '90 days')
+                          AND d.expires_at > NOW())
           AND (SELECT COUNT(*) FROM discounts dc WHERE dc.user_id = u.user_id
                AND dc.source <> 'manual') < 2
     """,
@@ -271,7 +271,7 @@ async def set_rule(
 
 
 async def eligible_count(source: str) -> int:
-    """Сколько юзеров подходят под правило прямо сейчас (с учётом дедупа/кулдауна)."""
+    """Сколько юзеров подходят под правило прямо сейчас (у кого нет активной скидки)."""
     sql = ELIGIBILITY_SQL.get(source)
     if not sql:
         return 0
