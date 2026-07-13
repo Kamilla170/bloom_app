@@ -362,3 +362,34 @@ async def run_auto_discounts(only_source: Optional[str] = None) -> dict:
         result[source] = granted
         logger.info(f"🏷️ auto-discount '{source}': кандидатов={len(rows)}, выдано={granted}")
     return result
+
+
+async def list_free_users(limit: int = 200) -> list[dict]:
+    """
+    Free-юзеры (не активный Pro) для ручной выдачи скидки, свежие сверху.
+    Поля для решения: вовлечённость (растения/вопросы/активность), регистрация,
+    платежи (был платящим / начинал оплату), есть ли уже активная скидка.
+    """
+    db = await get_db()
+    async with db.pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT
+                u.user_id, u.email, u.first_name, u.created_at,
+                u.plants_count, u.questions_asked, u.last_activity,
+                EXISTS (SELECT 1 FROM payments p
+                        WHERE p.user_id = u.user_id AND p.status = 'succeeded') AS was_payer,
+                EXISTS (SELECT 1 FROM payments p
+                        WHERE p.user_id = u.user_id
+                          AND p.status IN ('pending','canceled','waiting_for_capture')) AS had_checkout,
+                EXISTS (SELECT 1 FROM discounts d
+                        WHERE d.user_id = u.user_id AND d.expires_at > NOW()) AS has_active_discount
+            FROM users u
+            WHERE NOT EXISTS (SELECT 1 FROM subscriptions s WHERE s.user_id = u.user_id
+                              AND s.plan = 'pro' AND (s.expires_at IS NULL OR s.expires_at > NOW()))
+            ORDER BY u.last_activity DESC NULLS LAST, u.created_at DESC
+            LIMIT $1
+            """,
+            limit,
+        )
+    return [dict(r) for r in rows]

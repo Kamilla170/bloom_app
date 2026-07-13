@@ -19,6 +19,7 @@ from services.discount_service import (
     set_rule,
     eligible_count,
     run_auto_discounts,
+    list_free_users,
 )
 
 logger = logging.getLogger(__name__)
@@ -72,6 +73,12 @@ async def get_user_discounts(
 ):
     """Активные скидки конкретного юзера."""
     return {"discounts": await list_active_discounts(user_id)}
+
+
+@router.get("/users")
+async def list_users_for_grant(admin_id: int = Depends(require_admin)):
+    """Free-юзеры для ручной выдачи скидки (список с полями для решения)."""
+    return {"users": await list_free_users()}
 
 
 @router.post("/discounts/{discount_id}/revoke", response_model=SuccessResponse)

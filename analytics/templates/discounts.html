@@ -21,6 +21,7 @@
     label { display:block; font-size:13px; color:var(--mut); margin:10px 0 4px; }
     input, textarea { width:100%; background:#0f131a; border:1px solid var(--line); color:var(--txt);
                       border-radius:8px; padding:9px 11px; font-size:14px; }
+    input[type="checkbox"] { width:auto; padding:0; margin:0; accent-color: var(--acc); cursor:pointer; }
     .row { display:flex; gap:12px; flex-wrap:wrap; }
     .row > div { flex:1; min-width:120px; }
     button { background:var(--acc); color:#fff; border:0; border-radius:8px; padding:9px 16px;
@@ -51,8 +52,6 @@
     <h2>Ручная выдача</h2>
     <div class="card">
       <form method="post" action="/discounts/grant">
-        <label>user_id (через запятую или пробел)</label>
-        <textarea name="user_ids" rows="2" placeholder="123, 456 789" required></textarea>
         <div class="row">
           <div>
             <label>Скидка, %</label>
@@ -67,10 +66,58 @@
             <input name="label" placeholder="Только для вас — 30%">
           </div>
         </div>
-        <div style="margin-top:14px">
-          <button type="submit" {% if not configured %}disabled{% endif %}>Выдать скидку</button>
-          <span class="muted">Уже имеющие активную скидку пропускаются.</span>
+        <label style="margin-top:12px">Или вписать user_id вручную (через запятую/пробел)</label>
+        <input name="manual_ids" placeholder="123, 456">
+
+        <div style="margin:18px 0 8px; display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap">
+          <span class="muted">Отметь галочками, кому выдать (free-юзеры, недавно активные сверху):</span>
+          <button type="submit" {% if not configured %}disabled{% endif %}>Выдать выбранным</button>
         </div>
+
+        {% if users %}
+        <div style="overflow-x:auto">
+          <table>
+            <thead>
+              <tr>
+                <th></th><th>user_id</th><th>Контакт</th><th>Растений</th>
+                <th>Вопросов</th><th>Активность</th><th>Регистрация</th>
+                <th>Платежи</th><th>Скидка</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for u in users %}
+              <tr>
+                <td>
+                  <input type="checkbox" name="pick" value="{{ u.user_id }}"
+                         {% if u.has_active_discount %}disabled title="Уже есть активная скидка"{% endif %}>
+                </td>
+                <td>{{ u.user_id }}</td>
+                <td>{{ u.email or u.first_name or '—' }}</td>
+                <td>{{ u.plants_count }}</td>
+                <td>{{ u.questions_asked }}</td>
+                <td class="muted">{% if u.last_activity %}{{ u.last_activity[:10] }}{% else %}—{% endif %}</td>
+                <td class="muted">{% if u.created_at %}{{ u.created_at[:10] }}{% else %}—{% endif %}</td>
+                <td>
+                  {% if u.was_payer %}<span class="pill on">платил</span>
+                  {% elif u.had_checkout %}<span class="pill off">бросил оплату</span>
+                  {% else %}<span class="muted">—</span>{% endif %}
+                </td>
+                <td>{% if u.has_active_discount %}<span class="muted">активна</span>{% endif %}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <p class="muted" style="margin-top:10px">
+          Free-юзеры (до 200), недавно активные сверху. «Платил» — кандидат на win-back;
+          «бросил оплату» — почти платил. У кого уже активна скидка — галочка недоступна.
+        </p>
+        {% else %}
+        <p class="muted" style="margin-top:14px">
+          Список юзеров пуст или недоступен (проверь ADMIN_API_KEY / MAIN_API_URL).
+          Можно выдать по user_id вручную в поле выше.
+        </p>
+        {% endif %}
       </form>
     </div>
 
