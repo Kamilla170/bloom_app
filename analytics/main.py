@@ -218,11 +218,13 @@ async def discounts_rule(
     source: str,
     _: str = Depends(require_auth),
     enabled: str = Form(...),
+    enable_days: int = Form(0),
 ):
+    payload = {"enabled": (enabled == "on")}
+    if enabled == "on" and enable_days and enable_days > 0:
+        payload["enable_days"] = enable_days
     try:
-        res = await _admin_api_post(f"/admin/discount-rules/{source}", {
-            "enabled": (enabled == "on"),
-        })
+        res = await _admin_api_post(f"/admin/discount-rules/{source}", payload)
         return RedirectResponse(f"/discounts?msg={quote(res.get('message', 'OK'))}", status_code=303)
     except Exception as e:
         return RedirectResponse(f"/discounts?err={quote(str(e))}", status_code=303)

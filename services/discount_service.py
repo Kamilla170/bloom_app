@@ -229,8 +229,8 @@ async def get_rules() -> list[dict]:
     db = await get_db()
     async with db.pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT source, enabled, percent, duration_days, updated_at, updated_by "
-            "FROM discount_rules ORDER BY source"
+            "SELECT source, enabled, percent, duration_days, auto_disable_at, "
+            "updated_at, updated_by FROM discount_rules ORDER BY source"
         )
     return [dict(r) for r in rows]
 
@@ -240,29 +240,80 @@ async def set_rule(
     enabled: Optional[bool] = None,
     percent: Optional[int] = None,
     duration_days: Optional[int] = None,
+    enable_days: Optional[int] = None,
     updated_by: Optional[int] = None,
 ) -> bool:
-    """Обновить правило (только переданные поля). False, если source неизвестен."""
+    """
+    Обновить правило (только переданные поля). False, если source неизвестен.
+
+    enable_days действует только при включении (enabled=True): правило само
+    выключится через столько дней (auto_disable_at). Если при включении
+    enable_days не задан — правило работает до ручного выключения. При
+    выключении (enabled=False) auto_disable_at сбрасывается.
+    """
     if source not in ELIGIBILITY_SQL:
         return False
     db = await get_db()
     async with db.pool.acquire() as conn:
-        result = await conn.execute(
-            """
-            UPDATE discount_rules
-            SET enabled = COALESCE($2, enabled),
-                percent = COALESCE($3, percent),
-                duration_days = COALESCE($4, duration_days),
-                updated_by = COALESCE($5, updated_by),
-                updated_at = CURRENT_TIMESTAMP
-            WHERE source = $1
-            """,
-            source, enabled, percent, duration_days, updated_by,
-        )
+        if enabled is True:
+            auto_disable_at = (
+                datetime.utcnow() + timedelta(days=enable_days)
+                if enable_days and enable_days > 0 else None
+            )
+            result = await conn.execute(
+                """
+                UPDATE discount_rules
+                SET enabled = TRUE, auto_disable_at = $2,
+                    percent = COALESCE($3, percent),
+                    duration_days = COALESCE($4, duration_days),
+                    updated_by = $5, updated_at = CURRENT_TIMESTAMP
+                WHERE source = $1
+                """,
+                source, auto_disable_at, percent, duration_days, updated_by,
+            )
+        elif enabled is False:
+            result = await conn.execute(
+                """
+                UPDATE discount_rules
+                SET enabled = FALSE, auto_disable_at = NULL,
+                    percent = COALESCE($2, percent),
+                    duration_days = COALESCE($3, duration_days),
+                    updated_by = $4, updated_at = CURRENT_TIMESTAMP
+                WHERE source = $1
+                """,
+                source, percent, duration_days, updated_by,
+            )
+        else:
+            result = await conn.execute(
+                """
+                UPDATE discount_rules
+                SET percent = COALESCE($2, percent),
+                    duration_days = COALESCE($3, duration_days),
+                    updated_by = COALESCE($4, updated_by),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE source = $1
+                """,
+                source, percent, duration_days, updated_by,
+            )
     try:
         return int(result.split()[-1]) > 0
     except (ValueError, IndexError):
         return False
+
+
+async def _disable_expired_rules() -> None:
+    """Выключить правила, у которых наступил срок авто-выключения."""
+    db = await get_db()
+    async with db.pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE discount_rules
+            SET enabled = FALSE, auto_disable_at = NULL, updated_at = CURRENT_TIMESTAMP
+            WHERE enabled = TRUE
+              AND auto_disable_at IS NOT NULL
+              AND auto_disable_at < NOW()
+            """
+        )
 
 
 async def eligible_count(source: str) -> int:
@@ -281,6 +332,9 @@ async def run_auto_discounts(only_source: Optional[str] = None) -> dict:
     only_source — прогнать одно правило (например, сразу при включении в админке).
     Возвращает {source: сколько выдано}.
     """
+    # Сначала гасим правила, у которых истёк срок авто-выключения.
+    await _disable_expired_rules()
+
     result: dict = {}
     for rule in await get_rules():
         source = rule["source"]

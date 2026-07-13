@@ -464,6 +464,10 @@ class PlantDatabase:
                        ('winback',            FALSE, 35, 7)
                 ON CONFLICT (source) DO NOTHING
             """)
+            # Авто-выключение: если задано, правило само выключится в этот момент.
+            await conn.execute(
+                "ALTER TABLE discount_rules ADD COLUMN IF NOT EXISTS auto_disable_at TIMESTAMP"
+            )
 
             # Добавляем новые колонки
             try:
