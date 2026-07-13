@@ -99,6 +99,7 @@
             </td>
             <td>
               {% if r.enabled %}<span class="pill on">включено</span>
+                {% if r.auto_disable_at %}<div class="muted">до {{ r.auto_disable_at[:16]|replace('T',' ') }}</div>{% endif %}
               {% else %}<span class="pill off">выключено</span>{% endif %}
             </td>
             <td>{{ r.percent }}%</td>
@@ -113,6 +114,9 @@
               {% else %}
                 <form class="inline" method="post" action="/discounts/rule/{{ r.source }}">
                   <input type="hidden" name="enabled" value="on">
+                  <input type="number" name="enable_days" min="0" value="3"
+                         title="Через сколько дней само выключится (0 = вручную)"
+                         style="width:56px; margin-right:6px; display:inline-block">
                   <button type="submit" {% if not configured %}disabled{% endif %}>Включить</button>
                 </form>
               {% endif %}
@@ -125,6 +129,8 @@
         «Подходят сейчас» — сколько юзеров получат скидку при включении (у кого
         сейчас нет активной скидки). Включение сразу выдаёт скидку текущему множеству;
         выключение останавливает только новые выдачи (уже выданные доживают срок).
+        Поле «дней» у кнопки «Включить» — через сколько дней правило само выключится
+        (0 = держать включённым, пока не выключишь вручную).
         20% подходящих идут в holdout (контроль) для замера эффекта.
       </p>
       {% endif %}

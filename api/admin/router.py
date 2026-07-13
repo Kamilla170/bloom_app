@@ -102,6 +102,9 @@ class SetRuleRequest(BaseModel):
     enabled: Optional[bool] = None
     percent: Optional[int] = None
     duration_days: Optional[int] = None
+    # Автовыключение: при включении правило само выключится через столько дней.
+    # 0/None — работает до ручного выключения.
+    enable_days: Optional[int] = None
 
 
 @router.post("/discount-rules/{source}", response_model=SuccessResponse)
@@ -121,6 +124,7 @@ async def update_discount_rule(
         enabled=req.enabled,
         percent=req.percent,
         duration_days=req.duration_days,
+        enable_days=req.enable_days,
         updated_by=admin_id,
     )
     if not ok:
@@ -131,4 +135,6 @@ async def update_discount_rule(
         # Немедленный прогон по текущему множеству («раз и включил на них»).
         res = await run_auto_discounts(only_source=source)
         msg += f", выдано сразу: {res.get(source, 0)}"
+        if req.enable_days and req.enable_days > 0:
+            msg += f"; автовыключение через {req.enable_days} дн."
     return SuccessResponse(message=msg)
