@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Выдать PRO: bloom-pro EMAIL [EMAIL...] [дней]
+# Обёртка: прокидывает scripts/admin_cli.py в контейнер api через stdin,
+# поэтому после git pull пересобирать образ не нужно.
+set -euo pipefail
+REPO="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+cd "$REPO"
+if ! docker compose ps --status running --services 2>/dev/null | grep -qx api; then
+  echo "Контейнер api не запущен. Подними его:  cd $REPO && docker compose up -d" >&2
+  exit 1
+fi
+exec docker compose exec -T api python - grant "$@" < scripts/admin_cli.py
