@@ -504,6 +504,9 @@ class PlantDatabase:
                 # Интервал полива задан пользователем вручную — повторный анализ
                 # фото не должен затирать его мнением ИИ
                 await conn.execute("ALTER TABLE plants ADD COLUMN IF NOT EXISTS watering_interval_manual BOOLEAN DEFAULT FALSE")
+                # Дата следующего полива перенесена пользователем вручную. Живёт до
+                # ближайшего полива: пока флаг стоит, анализ фото дату не пересчитывает
+                await conn.execute("ALTER TABLE plants ADD COLUMN IF NOT EXISTS next_watering_date_manual BOOLEAN DEFAULT FALSE")
             except Exception as e:
                 logger.info(f"Колонки уже существуют: {e}")
             
@@ -1168,7 +1171,9 @@ class PlantDatabase:
         пересчитывается от последнего полива (compute_next_watering_date).
         next_watering_date — явная дата; побеждает расчётную. Без interval_days
         это разовый сдвиг: интервал не трогаем, и после следующего полива дата
-        снова считается как «день полива + интервал».
+        снова считается как «день полива + интервал». Явная дата помечается
+        next_watering_date_manual: до ближайшего полива её не пересчитывает и
+        анализ фото (иначе фото в чат молча отменяло бы перенос).
 
         today приходит снаружи, чтобы проверка даты в роутере и расчёт здесь
         опирались на одно и то же «сегодня».
@@ -1210,13 +1215,16 @@ class PlantDatabase:
                         SET watering_interval = $1,
                             base_watering_interval = $1,
                             watering_interval_manual = TRUE,
-                            next_watering_date = $2
-                        WHERE id = $3 AND user_id = $4
-                    """, new_interval, new_next_date, plant_id, user_id)
+                            next_watering_date = $2,
+                            next_watering_date_manual = $3
+                        WHERE id = $4 AND user_id = $5
+                    """, new_interval, new_next_date, next_watering_date is not None,
+                        plant_id, user_id)
                 elif next_watering_date is not None:
                     await conn.execute("""
                         UPDATE plants
-                        SET next_watering_date = $1
+                        SET next_watering_date = $1,
+                            next_watering_date_manual = TRUE
                         WHERE id = $2 AND user_id = $3
                     """, new_next_date, plant_id, user_id)
 
@@ -1470,12 +1478,14 @@ class PlantDatabase:
                 new_max_streak = max(previous_max, new_streak)
                 new_next_date = today + timedelta(days=interval)
                 
-                # Обновляем растение
+                # Обновляем растение. Признак ручной даты снимаем: перенос действует
+                # до ближайшего полива, дальше дата снова считается по интервалу.
                 await conn.execute("""
                     UPDATE plants
                     SET last_watered = $1,
                         watering_count = COALESCE(watering_count, 0) + 1,
                         next_watering_date = $2,
+                        next_watering_date_manual = FALSE,
                         current_streak = $3,
                         max_streak = $4
                     WHERE id = $5 AND user_id = $6
