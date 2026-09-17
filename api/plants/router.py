@@ -36,6 +36,7 @@ from achievements import (
     increment_photo_count,
 )
 from api.rate_limit import limiter
+from utils.watering_schedule import validate_manual_watering_date
 
 logger = logging.getLogger(__name__)
 
@@ -363,11 +364,34 @@ async def update_plant(
     req: UpdatePlantRequest,
     user_id: int = Depends(get_current_user),
 ):
-    """Обновить растение (имя и/или fertilizing_enabled)"""
+    """
+    Обновить растение: имя, fertilizing_enabled, расписание полива.
+
+    Расписание полива (оба поля необязательны):
+      - только watering_interval (1..60 дней) — интервал помечается как заданный
+        вручную (анализ фото его больше не перезаписывает), а next_watering_date
+        пересчитывается: последний полив + интервал, без поливов — сегодня +
+        интервал, но не раньше сегодня;
+      - только next_watering_date (YYYY-MM-DD) — разовый сдвиг, интервал не
+        меняется: после следующего полива дата снова «день полива + интервал»;
+      - оба поля — интервал сохраняется, а дата берётся явная, не расчётная.
+    Дата допустима от «вчера» (люфт на часовые пояса) до года вперёд, иначе 400.
+    """
     db = await get_db()
     plant = await db.get_plant_by_id(plant_id, user_id)
     if not plant:
         raise HTTPException(status_code=404, detail="Растение не найдено")
+
+    # «Сегодня» берём так же, как полив (water_plant_with_streak): дата после
+    # ручной правки и дата после полива должны жить в одной системе отсчёта.
+    today = datetime.now().date()
+
+    # Дату проверяем до любых записей: иначе запрос «имя + плохая дата»
+    # переименовал бы растение и только потом вернул 400.
+    if req.next_watering_date is not None:
+        date_error = validate_manual_watering_date(req.next_watering_date, today)
+        if date_error:
+            raise HTTPException(status_code=400, detail=date_error)
 
     updated_fields = []
 
@@ -380,6 +404,27 @@ async def update_plant(
     if req.fertilizing_enabled is not None:
         await db.update_plant_fertilizing(plant_id, user_id, req.fertilizing_enabled)
         updated_fields.append(f"подкормка: {'вкл' if req.fertilizing_enabled else 'выкл'}")
+
+    if req.watering_interval is not None or req.next_watering_date is not None:
+        schedule = await db.update_plant_watering_schedule(
+            plant_id, user_id, today,
+            interval_days=req.watering_interval,
+            next_watering_date=req.next_watering_date,
+        )
+        if not schedule:
+            raise HTTPException(status_code=404, detail="Растение не найдено")
+
+        logger.info(
+            f"💧 Расписание полива изменено вручную: plant={plant_id}, user={user_id}, "
+            f"интервал={req.watering_interval}, дата={req.next_watering_date} -> "
+            f"{schedule['watering_interval']} дн., {schedule['next_watering_date']}"
+        )
+
+        if req.watering_interval is not None:
+            updated_fields.append(f"интервал полива: {schedule['watering_interval']} дн.")
+        updated_fields.append(
+            f"следующий полив: {schedule['next_watering_date'].strftime('%d.%m.%Y')}"
+        )
 
     if not updated_fields:
         raise HTTPException(status_code=400, detail="Нет полей для обновления")

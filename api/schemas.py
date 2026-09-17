@@ -6,6 +6,8 @@ from datetime import datetime, date
 from typing import Optional, List
 from pydantic import BaseModel, Field
 
+from utils.watering_schedule import MIN_WATERING_INTERVAL, MAX_WATERING_INTERVAL
+
 
 # === AUTH ===
 
@@ -221,6 +223,13 @@ class FertilizeResponse(BaseModel):
 class UpdatePlantRequest(BaseModel):
     name: Optional[str] = Field(None, min_length=2, max_length=100)
     fertilizing_enabled: Optional[bool] = None
+    # Ручная правка расписания полива. Поля независимы: только интервал — дата
+    # пересчитается от последнего полива; только дата — разовый сдвиг, интервал
+    # не меняется; оба сразу — явная дата побеждает пересчёт.
+    watering_interval: Optional[int] = Field(
+        None, ge=MIN_WATERING_INTERVAL, le=MAX_WATERING_INTERVAL
+    )
+    next_watering_date: Optional[date] = None
 
 
 class RenamePlantRequest(BaseModel):

@@ -187,7 +187,8 @@ async def update_plant_state_from_photo(plant_id: int, user_id: int,
     Обновление состояния растения по новому фото (Этап 3).
     Старое главное фото уезжает в plant_photos history.
     Также:
-      - корректирует watering_interval если передан
+      - корректирует watering_interval если передан (кроме растений с интервалом,
+        заданным вручную: watering_interval_manual — там решает пользователь)
       - пишет сообщение в plant_qa_history (анализ + рекомендации)
 
     message_type:
@@ -228,7 +229,26 @@ async def update_plant_state_from_photo(plant_id: int, user_id: int,
         # Обновляем главное фото и дату последнего анализа.
         # Если переданы новые рекомендации по интервалу полива, корректируем.
         async with db.pool.acquire() as conn:
-            if new_watering_interval and 3 <= new_watering_interval <= 28:
+            # Интервал, заданный пользователем вручную (PATCH /plants/{id}), мнением
+            # ИИ не перезаписываем: иначе каждое новое фото молча сбрасывало бы его
+            # настройку вместе с датой. Флаг читаем здесь, а не берём из plant выше —
+            # он должен быть свежим на момент записи.
+            interval_is_manual = await conn.fetchval("""
+                SELECT COALESCE(watering_interval_manual, FALSE)
+                FROM plants
+                WHERE id = $1
+            """, plant_id)
+
+            ai_interval_valid = bool(new_watering_interval and 3 <= new_watering_interval <= 28)
+
+            if ai_interval_valid and interval_is_manual:
+                logger.info(
+                    f"💧 Интервал полива растения {plant_id} задан вручную "
+                    f"({plant.get('watering_interval')} дн.) — рекомендацию ИИ "
+                    f"({new_watering_interval} дн.) не применяем, дату полива не трогаем"
+                )
+
+            if ai_interval_valid and not interval_is_manual:
                 # Корректируем watering_interval и пересчитываем next_watering_date
                 last_watered = plant.get('last_watered')
                 today = datetime.now().date()
