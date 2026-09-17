@@ -1,9 +1,11 @@
 import os
 import asyncpg
 import json
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional
 import logging
+
+from utils.watering_schedule import compute_next_watering_date
 
 logger = logging.getLogger(__name__)
 
@@ -499,6 +501,12 @@ class PlantDatabase:
                 await conn.execute("ALTER TABLE plants ADD COLUMN IF NOT EXISTS next_watering_date DATE")
                 await conn.execute("ALTER TABLE plants ADD COLUMN IF NOT EXISTS current_streak INTEGER DEFAULT 0")
                 await conn.execute("ALTER TABLE plants ADD COLUMN IF NOT EXISTS max_streak INTEGER DEFAULT 0")
+                # Интервал полива задан пользователем вручную — повторный анализ
+                # фото не должен затирать его мнением ИИ
+                await conn.execute("ALTER TABLE plants ADD COLUMN IF NOT EXISTS watering_interval_manual BOOLEAN DEFAULT FALSE")
+                # Дата следующего полива перенесена пользователем вручную. Живёт до
+                # ближайшего полива: пока флаг стоит, анализ фото дату не пересчитывает
+                await conn.execute("ALTER TABLE plants ADD COLUMN IF NOT EXISTS next_watering_date_manual BOOLEAN DEFAULT FALSE")
             except Exception as e:
                 logger.info(f"Колонки уже существуют: {e}")
             
@@ -1151,6 +1159,80 @@ class PlantDatabase:
                 WHERE id = $2
             """, base_interval, plant_id)
     
+    async def update_plant_watering_schedule(self, plant_id: int, user_id: int, today: date,
+                                             interval_days: Optional[int] = None,
+                                             next_watering_date: Optional[date] = None) -> Optional[Dict]:
+        """
+        Ручная правка расписания полива пользователем.
+
+        interval_days — новый интервал. Пишется и в watering_interval, и в
+        base_watering_interval, а растение помечается watering_interval_manual,
+        чтобы повторный анализ фото не затёр выбор пользователя. Дата при этом
+        пересчитывается от последнего полива (compute_next_watering_date).
+        next_watering_date — явная дата; побеждает расчётную. Без interval_days
+        это разовый сдвиг: интервал не трогаем, и после следующего полива дата
+        снова считается как «день полива + интервал». Явная дата помечается
+        next_watering_date_manual: до ближайшего полива её не пересчитывает и
+        анализ фото (иначе фото в чат молча отменяло бы перенос).
+
+        today приходит снаружи, чтобы проверка даты в роутере и расчёт здесь
+        опирались на одно и то же «сегодня».
+
+        Возвращает итоговые watering_interval и next_watering_date или None,
+        если растение не найдено (чужое тоже — условие по user_id).
+        """
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                # FOR UPDATE: дата считается от last_watered, и параллельный полив
+                # не должен поменять его между чтением и записью
+                row = await conn.fetchrow("""
+                    SELECT last_watered,
+                           COALESCE(watering_interval, 5) as watering_interval,
+                           next_watering_date
+                    FROM plants
+                    WHERE id = $1 AND user_id = $2
+                    FOR UPDATE
+                """, plant_id, user_id)
+
+                if not row:
+                    return None
+
+                new_interval = row['watering_interval']
+                new_next_date = row['next_watering_date']
+
+                if interval_days is not None:
+                    new_interval = interval_days
+                    new_next_date = compute_next_watering_date(
+                        row['last_watered'], interval_days, today
+                    )
+
+                if next_watering_date is not None:
+                    new_next_date = next_watering_date
+
+                if interval_days is not None:
+                    await conn.execute("""
+                        UPDATE plants
+                        SET watering_interval = $1,
+                            base_watering_interval = $1,
+                            watering_interval_manual = TRUE,
+                            next_watering_date = $2,
+                            next_watering_date_manual = $3
+                        WHERE id = $4 AND user_id = $5
+                    """, new_interval, new_next_date, next_watering_date is not None,
+                        plant_id, user_id)
+                elif next_watering_date is not None:
+                    await conn.execute("""
+                        UPDATE plants
+                        SET next_watering_date = $1,
+                            next_watering_date_manual = TRUE
+                        WHERE id = $2 AND user_id = $3
+                    """, new_next_date, plant_id, user_id)
+
+                return {
+                    "watering_interval": new_interval,
+                    "next_watering_date": new_next_date,
+                }
+    
     async def get_all_plants_for_seasonal_update(self) -> list:
         """Получить все растения для сезонной корректировки через GPT"""
         async with self.pool.acquire() as conn:
@@ -1396,12 +1478,14 @@ class PlantDatabase:
                 new_max_streak = max(previous_max, new_streak)
                 new_next_date = today + timedelta(days=interval)
                 
-                # Обновляем растение
+                # Обновляем растение. Признак ручной даты снимаем: перенос действует
+                # до ближайшего полива, дальше дата снова считается по интервалу.
                 await conn.execute("""
                     UPDATE plants
                     SET last_watered = $1,
                         watering_count = COALESCE(watering_count, 0) + 1,
                         next_watering_date = $2,
+                        next_watering_date_manual = FALSE,
                         current_streak = $3,
                         max_streak = $4
                     WHERE id = $5 AND user_id = $6
