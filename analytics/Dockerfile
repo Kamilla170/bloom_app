@@ -13,4 +13,7 @@ COPY . .
 
 EXPOSE 8000
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Shell-форма, а не JSON-массив: Railway передаёт порт через переменную
+# PORT, и раскрыть её может только оболочка. В docker-compose на сервере
+# PORT не задан — остаётся 8000, на который проксирует nginx.
+CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}
