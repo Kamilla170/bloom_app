@@ -353,7 +353,9 @@ async def _ensure_consents_table(conn) -> None:
 # Подтверждение для Android, что https-ссылки api.bloomai.ru можно открывать
 # сразу в приложении ru.bloomai.app (возврат из Yandex OAuth). Android
 # запрашивает этот файл при установке приложения и сверяет отпечаток подписи.
-# Отпечатки: релизный ключ (сборка для RuStore) и debug-ключ (тестовые сборки).
+# Отпечатки: релизный ключ (сборка для RuStore), ключ подписи Google Play
+# (стор переподписывает AAB своим ключом — Play App Signing) и debug-ключ
+# (тестовые сборки).
 _ASSETLINKS = [
     {
         "relation": ["delegate_permission/common.handle_all_urls"],
@@ -363,6 +365,9 @@ _ASSETLINKS = [
             "sha256_cert_fingerprints": [
                 # release: D:/docs/bloom-release.jks, alias bloom
                 "5D:0B:7A:C9:DA:79:8D:44:89:99:78:53:E6:8E:5A:64:55:C4:A2:AD:2B:F9:67:5B:8D:54:03:0B:DC:60:08:CA",
+                # Google Play: «Сертификат ключа подписи приложения» в Play
+                # Console → Защищено Google Play → Защита Google Play
+                "ED:9E:73:DE:DD:F4:31:DD:EE:2B:CA:52:F5:C5:A2:A4:60:A2:89:9B:99:5C:60:FC:38:99:76:8B:80:F9:0C:B6",
                 # debug: стандартный debug.keystore
                 "45:2A:9C:93:46:F9:02:A0:76:2D:89:5F:28:3E:F4:96:6C:19:E2:D8:D0:23:E4:73:2E:5F:3D:23:51:FD:51:3A",
             ],
